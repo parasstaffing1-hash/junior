@@ -102,9 +102,24 @@ const App = {
         }
     },
 
+    async handleFileUpload(files) {
+        if (files && files.length > 0) {
+            await this.handleFileSelected(files[0]);
+        }
+    },
+
     async handleFileSelected(file) {
         this.currentFile = file;
-        document.getElementById('drop-zone').classList.add('hidden');
+        // Hide the whole connector grid
+        const sourcesSection = document.getElementById('sources-section');
+        if (sourcesSection) {
+            const grid = sourcesSection.querySelector('.connector-grid');
+            if (grid) grid.classList.add('hidden');
+        }
+        
+        const dropZone = document.getElementById('drop-zone');
+        if (dropZone) dropZone.classList.add('hidden');
+        
         document.getElementById('upload-progress').classList.remove('hidden');
         document.getElementById('upload-status-text').textContent = "Inspecting dataset...";
 
@@ -172,7 +187,13 @@ const App = {
                 
                 // Reset upload state for next time
                 document.getElementById('upload-progress').classList.add('hidden');
-                document.getElementById('drop-zone').classList.remove('hidden');
+                const sourcesSection = document.getElementById('sources-section');
+                if (sourcesSection) {
+                    const grid = sourcesSection.querySelector('.connector-grid');
+                    if (grid) grid.classList.remove('hidden');
+                }
+                const dropZone = document.getElementById('drop-zone');
+                if (dropZone) dropZone.classList.remove('hidden');
                 
                 this.loadDatasetOverview(data.dataset_id, data.name);
             } else {
@@ -188,7 +209,15 @@ const App = {
         this.showToast(err.message);
         document.getElementById('upload-progress').classList.add('hidden');
         document.getElementById('excel-selection-section').classList.add('hidden');
-        document.getElementById('drop-zone').classList.remove('hidden');
+        
+        const sourcesSection = document.getElementById('sources-section');
+        if (sourcesSection) {
+            const grid = sourcesSection.querySelector('.connector-grid');
+            if (grid) grid.classList.remove('hidden');
+        }
+        
+        const dropZone = document.getElementById('drop-zone');
+        if (dropZone) dropZone.classList.remove('hidden');
     },
 
     async loadDatasetOverview(id, name) {
@@ -259,13 +288,31 @@ const App = {
             </a>
         `).join('');
 
-        const kpiContainer = document.getElementById('bi-report-kpis');
-        kpiContainer.innerHTML = (report.kpis || []).map(kpi => `
-            <div class="stat-card bi-kpi-card">
-                <i class="fa-solid fa-chart-simple"></i>
-                <div><p>${this.escapeHtml(kpi.label)}</p><h4>${this.escapeHtml(kpi.formatted_value ?? kpi.value ?? '--')}</h4></div>
+        const dashboardContainer = document.getElementById('bi-dashboard-container');
+        
+        // 1. Generate KPIs HTML (4 across -> span-3)
+        const kpiHtml = (report.kpis || []).map(kpi => `
+            <div class="pbi-card span-3">
+                <div class="pbi-card-title">
+                    <i class="fa-solid fa-chart-simple"></i> ${this.escapeHtml(kpi.label)}
+                </div>
+                <div class="pbi-kpi-value">${this.escapeHtml(kpi.formatted_value ?? kpi.value ?? '--')}</div>
             </div>
         `).join('');
+
+        // 2. Generate Charts HTML (Alternating spans or just span-6 for 2 across)
+        const chartHtml = (report.charts || []).map((chart, index) => {
+            // Logic to make wider charts depending on index to match Power BI layouts
+            const spanClass = (index % 3 === 0) ? 'span-12' : 'span-6';
+            return `
+            <div class="pbi-card ${spanClass} row-span-3">
+                <div class="pbi-card-title">${this.escapeHtml(chart.title || 'Chart')}</div>
+                <div id="echart-${index}" style="width: 100%; height: 100%; min-height: 350px;"></div>
+            </div>
+            `;
+        }).join('');
+
+        dashboardContainer.innerHTML = kpiHtml + chartHtml;
 
         const findingsSection = document.getElementById('bi-report-findings-section');
         const findingsContainer = document.getElementById('bi-report-findings');
@@ -275,27 +322,78 @@ const App = {
             <li><span class="finding-severity ${this.escapeHtml(finding.severity || 'info')}">${this.escapeHtml(finding.severity || 'info')}</span>${this.escapeHtml(finding.message || finding.code || 'Finding')}</li>
         `).join('');
 
-        const chartContainer = document.getElementById('bi-report-charts');
-        chartContainer.innerHTML = (report.charts || []).map(chart => {
-            const categoryKey = chart.category_column || chart.x_column;
-            const values = (chart.data || []).map(row => Number(row.value)).filter(value => Number.isFinite(value));
-            const maxValue = Math.max(1, ...values.map(value => Math.abs(value)));
-            const rows = (chart.data || []).map(row => {
-                const rawValue = Number(row.value);
-                const numericValue = Number.isFinite(rawValue) ? rawValue : 0;
-                const width = Math.min(100, Math.abs(numericValue) / maxValue * 100);
-                const label = row[categoryKey] ?? row.label ?? '';
-                return `<div class="bi-chart-row">
-                    <span class="bi-chart-label" title="${this.escapeHtml(label)}">${this.escapeHtml(label)}</span>
-                    <span class="bi-chart-track"><span class="bi-chart-bar ${numericValue < 0 ? 'negative' : ''}" style="width:${width}%"></span></span>
-                    <span class="bi-chart-value">${this.escapeHtml(numericValue.toLocaleString(undefined, { maximumFractionDigits: 2 }))}</span>
-                </div>`;
-            }).join('');
-            return `<section class="card bi-chart-card">
-                <h3>${this.escapeHtml(chart.title || 'Chart')}</h3>
-                <div class="bi-chart-rows">${rows || '<p class="empty-text">No chart data available.</p>'}</div>
-            </section>`;
-        }).join('');
+        // Initialize ECharts instances
+        if (window.echarts) {
+            const pbiPalette = ['#118DFF', '#12239E', '#E66C37', '#6B007B', '#E044A7', '#744EC2', '#D9B300', '#D64550', '#197278'];
+            
+            (report.charts || []).forEach((chart, index) => {
+                const chartDiv = document.getElementById(`echart-${index}`);
+                if (!chartDiv) return;
+                
+                const myChart = echarts.init(chartDiv, 'dark'); // Initialize in dark theme to match our UI
+                
+                let option = chart.echarts_option;
+                if (!option) {
+                    // Fallback generator for older spec format
+                    const categoryKey = chart.category_column || chart.x_column;
+                    const data = chart.data || [];
+                    
+                    const xAxisData = data.map(row => row[categoryKey] ?? row.label ?? 'Unknown');
+                    const seriesData = data.map(row => Number(row.value) || 0);
+
+                    option = {
+                        backgroundColor: 'transparent',
+                        color: pbiPalette,
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'shadow' }
+                        },
+                        grid: {
+                            left: '3%',
+                            right: '4%',
+                            bottom: '5%',
+                            containLabel: true
+                        },
+                        xAxis: {
+                            type: 'category',
+                            data: xAxisData,
+                            axisLabel: {
+                                interval: 0,
+                                rotate: xAxisData.length > 5 ? 30 : 0
+                            }
+                        },
+                        yAxis: {
+                            type: 'value'
+                        },
+                        series: [
+                            {
+                                name: chart.value_column || 'Value',
+                                type: chart.chart_type === 'line' ? 'line' : 'bar',
+                                data: seriesData,
+                                itemStyle: {
+                                    borderRadius: [4, 4, 0, 0]
+                                }
+                            }
+                        ]
+                    };
+                } else {
+                    // Ensure backend options use the PBI color theme
+                    if (!option.color) {
+                        option.color = pbiPalette;
+                    }
+                }
+                
+                // Force transparent background for UI consistency
+                option.backgroundColor = 'transparent';
+                
+                myChart.setOption(option);
+                
+                // Make chart responsive
+                window.addEventListener('resize', () => {
+                    myChart.resize();
+                });
+            });
+        }
 
         const tableContainer = document.getElementById('bi-report-tables');
         tableContainer.innerHTML = (report.tables || []).map(table => {
@@ -356,6 +454,126 @@ const App = {
             console.error(err);
             status.textContent = err.message || 'BI report generation failed.';
             this.showToast(status.textContent);
+        }
+    },
+
+    switchView(viewName) {
+        // Update sidebar active states
+        const navIds = ['nav-dashboard', 'nav-quality', 'nav-statistics', 'nav-eda', 'nav-reports'];
+        navIds.forEach(id => {
+            const el = document.getElementById(id);
+            if(el) {
+                if (id === `nav-${viewName}`) el.classList.add('active');
+                else el.classList.remove('active');
+            }
+        });
+
+        // Toggle panel visibility
+        const panelIds = ['view-panel-dashboard', 'view-panel-quality', 'view-panel-statistics', 'view-panel-eda', 'view-panel-reports'];
+        panelIds.forEach(id => {
+            const el = document.getElementById(id);
+            if(el) {
+                if (id === `view-panel-${viewName}`) el.classList.remove('hidden');
+                else el.classList.add('hidden');
+            }
+        });
+    },
+
+    async runQualityAnalysis() {
+        if (!this.currentDatasetId) return;
+        const container = document.getElementById('quality-results-container');
+        container.innerHTML = '<div class="spinner-small"></div> Running quality analysis...';
+        try {
+            const res = await fetch(`/api/v1/datasets/${this.currentDatasetId}/quality/analyze`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error?.message || 'Failed to analyze quality');
+            
+            container.innerHTML = `
+                <div class="metrics-grid">
+                    <div class="stat-card">
+                        <i class="fa-solid fa-heart-pulse"></i>
+                        <div><p>Health Score</p><h4>${data.health_score || '--'}/100</h4></div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <div><p>Missing Cells</p><h4>${data.missing_cells_count || 0}</h4></div>
+                    </div>
+                </div>
+                <div style="margin-top: 20px;">
+                    <h4>Column Profiles</h4>
+                    <ul>
+                        ${Object.entries(data.column_profiles || {}).map(([col, prof]) => 
+                            `<li><strong>${this.escapeHtml(col)}:</strong> ${prof.completeness_percentage}% complete, ${prof.unique_count} unique values</li>`
+                        ).join('')}
+                    </ul>
+                </div>
+            `;
+        } catch (err) {
+            container.innerHTML = `<p class="text-red">Error: ${err.message}</p>`;
+        }
+    },
+
+    async runStatistics() {
+        if (!this.currentDatasetId) return;
+        const container = document.getElementById('statistics-results-container');
+        container.innerHTML = '<div class="spinner-small"></div> Generating statistics...';
+        try {
+            const res = await fetch(`/api/v1/datasets/${this.currentDatasetId}/statistics/summary`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error?.message || 'Failed to generate statistics');
+            
+            let html = '';
+            const sections = data.sections || [];
+            sections.forEach(section => {
+                if (section.type === 'table' && section.content && section.content.rows) {
+                    const columns = Object.keys(section.content.rows[0] || {});
+                    html += `<h4>${this.escapeHtml(section.title)}</h4>`;
+                    html += `<div class="table-container"><table><thead><tr>`;
+                    columns.forEach(c => html += `<th>${this.escapeHtml(c)}</th>`);
+                    html += `</tr></thead><tbody>`;
+                    section.content.rows.forEach(r => {
+                        html += `<tr>`;
+                        columns.forEach(c => html += `<td>${this.escapeHtml(r[c])}</td>`);
+                        html += `</tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+            });
+            container.innerHTML = html || '<p>No numeric statistics available.</p>';
+        } catch (err) {
+            container.innerHTML = `<p class="text-red">Error: ${err.message}</p>`;
+        }
+    },
+
+    async runEDA() {
+        if (!this.currentDatasetId) return;
+        const container = document.getElementById('eda-results-container');
+        container.innerHTML = '<div class="spinner-small"></div> Generating EDA...';
+        try {
+            const res = await fetch(`/api/v1/datasets/${this.currentDatasetId}/eda/report`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error?.message || 'Failed to generate EDA');
+            
+            let html = '';
+            const sections = data.sections || [];
+            sections.forEach(section => {
+                if (section.type === 'table' && section.content && section.content.rows) {
+                    const columns = Object.keys(section.content.rows[0] || {});
+                    html += `<h4>${this.escapeHtml(section.title)}</h4>`;
+                    html += `<div class="table-container"><table><thead><tr>`;
+                    columns.forEach(c => html += `<th>${this.escapeHtml(c)}</th>`);
+                    html += `</tr></thead><tbody>`;
+                    section.content.rows.forEach(r => {
+                        html += `<tr>`;
+                        columns.forEach(c => html += `<td>${this.escapeHtml(r[c])}</td>`);
+                        html += `</tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+            });
+            container.innerHTML = html || '<p>EDA generated successfully.</p>';
+        } catch (err) {
+            container.innerHTML = `<p class="text-red">Error: ${err.message}</p>`;
         }
     },
 

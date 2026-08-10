@@ -6,12 +6,13 @@ from typing import Any, Optional
 from urllib.parse import urlencode
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Query, Request, UploadFile, BackgroundTasks
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from datetime import datetime, timezone
 
 from app.core.database import Base, SessionLocal, build_database, engine
 from app.core.automation.gateway import action_catalog, dispatch_plan
@@ -25,7 +26,7 @@ from app.core.statistics.report import generate_statistics_report
 from app.core.transformation.pipeline import execute_pipeline
 from app.core.visualization.recommender import recommend_charts
 from app.errors import AppError
-from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion
+from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun
 from app.orchestration.automated_analyst import AutomatedAnalyst
 from app.orchestration.platform import (
     PlatformAnalysisError,
@@ -566,47 +567,121 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         except Exception as exc:
             raise AppError("AUTOMATION_ACTION_NOT_ALLOWED", getattr(exc, "message", str(exc)), status_code=422, details=getattr(exc, "details", {})) from exc
 
+    class DummyRequest:
+        def __init__(self, app_instance):
+            self.app = app_instance
+
+    def _execute_automation_run(run_id: str):
+        db = app.state.SessionLocal()
+        try:
+            run = db.query(AutomationRun).filter(AutomationRun.id == run_id).first()
+            if not run: return
+            
+            run.status = "RUNNING"
+            run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+            
+            req = DummyRequest(app)
+            action = run.action
+            action_payload = run.parameters.get("payload") or {}
+            context = run.parameters.get("context") or {}
+            dataset_id = context.get("dataset_id")
+            
+            if action == "analyst.analyze":
+                AutomatedAnalyst(db=db, storage=req.app.state.storage).run_full_pipeline(dataset_id)
+            elif action == "bi.report":
+                build_dataset_bi_report(dataset_id, req, db, country=action_payload.get("country"), product=action_payload.get("product"), segment=action_payload.get("segment"))
+            elif action == "quality.analyze":
+                analyze_quality(dataset_id, action_payload, req, db)
+            elif action == "cleaning.preview":
+                cleaning_operation(dataset_id, action_payload, req, db, False)
+            elif action == "cleaning.apply":
+                cleaning_operation(dataset_id, action_payload, req, db, True)
+            elif action == "transformation.preview":
+                transformation_operation(dataset_id, action_payload, req, db, False)
+            elif action == "transformation.apply":
+                transformation_operation(dataset_id, action_payload, req, db, True)
+            elif action == "statistics.summary":
+                statistics_summary(dataset_id, action_payload, req, db)
+            elif action == "eda.report":
+                eda_report(dataset_id, action_payload, req, db)
+            elif action == "charts.recommend":
+                recommend_visualizations(dataset_id, action_payload, req, db)
+            elif action == "kpi.calculate":
+                calculate_dataset_kpi(dataset_id, action_payload, req, db)
+            elif action == "dashboard.validate":
+                validate_dashboard(context.get("dashboard_id"), action_payload)
+            elif action == "report.pdf":
+                generate_report_file(action_payload, "pdf")
+            elif action == "report.excel":
+                generate_report_file(action_payload, "xlsx")
+            else:
+                raise Exception(f"Action '{action}' is not supported in background execution.")
+            
+            run.status = "COMPLETED"
+            run.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            run.status = "FAILED"
+            run.error_details = {"error": str(exc)}
+            run.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.commit()
+        finally:
+            db.close()
+
+    @app.post("/api/v1/automation/actions")
     @app.post("/api/v1/automation/execute")
-    def automation_execute(payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
+    def automation_execute(payload: dict[str, Any], request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
         body = payload or {}
         action = body.get("action")
         context = body.get("context") or {}
         action_payload = body.get("payload") or {}
+        idempotency_key = body.get("idempotency_key")
+        correlation_id = body.get("correlation_id")
+        
+        if idempotency_key:
+            existing = db.query(AutomationRun).filter(AutomationRun.idempotency_key == idempotency_key).first()
+            if existing:
+                return {"run_id": existing.id, "status": existing.status, "message": "Returned existing run due to idempotency_key."}
+
         try:
             dispatch_plan(action, context, action_payload)
         except Exception as exc:
             raise AppError("AUTOMATION_ACTION_NOT_ALLOWED", getattr(exc, "message", str(exc)), status_code=422, details=getattr(exc, "details", {})) from exc
-        dataset_id = context.get("dataset_id")
-        if action == "analyst.analyze":
-            return AutomatedAnalyst(db=db, storage=request.app.state.storage).run_full_pipeline(dataset_id)
-        if action == "bi.report":
-            _, report = build_dataset_bi_report(dataset_id, request, db, country=action_payload.get("country"), product=action_payload.get("product"), segment=action_payload.get("segment"))
-            return public_bi_report(dataset_id, report, country=action_payload.get("country"), product=action_payload.get("product"), segment=action_payload.get("segment"))
-        if action == "quality.analyze":
-            return analyze_quality(dataset_id, action_payload, request, db)
-        if action == "cleaning.preview":
-            return cleaning_operation(dataset_id, action_payload, request, db, False)
-        if action == "cleaning.apply":
-            return cleaning_operation(dataset_id, action_payload, request, db, True)
-        if action == "transformation.preview":
-            return transformation_operation(dataset_id, action_payload, request, db, False)
-        if action == "transformation.apply":
-            return transformation_operation(dataset_id, action_payload, request, db, True)
-        if action == "statistics.summary":
-            return statistics_summary(dataset_id, action_payload, request, db)
-        if action == "eda.report":
-            return eda_report(dataset_id, action_payload, request, db)
-        if action == "charts.recommend":
-            return recommend_visualizations(dataset_id, action_payload, request, db)
-        if action == "kpi.calculate":
-            return calculate_dataset_kpi(dataset_id, action_payload, request, db)
-        if action == "dashboard.validate":
-            return validate_dashboard(context.get("dashboard_id"), action_payload)
-        if action == "report.pdf":
-            return generate_report_file(action_payload, "pdf")
-        if action == "report.excel":
-            return generate_report_file(action_payload, "xlsx")
-        raise AppError("AUTOMATION_EXECUTION_UNSUPPORTED", "The action is allowlisted but has no execution adapter.", status_code=422, details={"action": action})
+
+        run = AutomationRun(
+            dataset_id=context.get("dataset_id", "GLOBAL"),
+            source_version_id=context.get("version_id"),
+            action=action,
+            parameters=payload,
+            idempotency_key=idempotency_key,
+            correlation_id=correlation_id,
+            status="QUEUED"
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        background_tasks.add_task(_execute_automation_run, run.id)
+        
+        return {"run_id": run.id, "status": run.status}
+
+    @app.get("/api/v1/automation/runs/{run_id}")
+    def get_automation_run_status(run_id: str, db: Session = Depends(get_db)):
+        run = db.query(AutomationRun).filter(AutomationRun.id == run_id).first()
+        if not run:
+            raise AppError("RUN_NOT_FOUND", "Automation run not found", status_code=404)
+        return {
+            "run_id": run.id,
+            "action": run.action,
+            "status": run.status,
+            "created_at": run.created_at,
+            "started_at": run.started_at,
+            "completed_at": run.completed_at,
+            "error_details": run.error_details,
+            "correlation_id": run.correlation_id
+        }
 
     def generate_report_file(payload: dict[str, Any] | None, kind: str):
         manifest = (payload or {}).get("manifest") or payload or {}

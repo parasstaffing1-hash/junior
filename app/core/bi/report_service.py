@@ -250,8 +250,14 @@ def build_bi_report(
     chart_by_ref: dict[str, dict[str, Any]] = {}
     notes: list[str] = []
 
+    from app.core.visualization.echarts import generate_echarts_option
+
     def add_chart(source_ref: str, spec: dict[str, Any]) -> None:
         content = {**_jsonable(spec), "source_ref": source_ref}
+        try:
+            content["echarts_option"] = generate_echarts_option(content)
+        except Exception as e:
+            pass # fallback to basic frontend rendering if it fails
         charts.append(content)
         chart_by_ref[source_ref] = content
 

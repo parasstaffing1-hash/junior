@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 </head>
 <body>
     <!-- Background Elements -->
@@ -42,15 +43,72 @@
             </header>
 
             <main>
-                <!-- Upload Section -->
-                <section class="card upload-section" id="upload-section">
-                    <div class="drop-zone" id="drop-zone">
-                        <i class="fa-solid fa-cloud-arrow-up"></i>
-                        <h3>Drag & Drop Dataset</h3>
-                        <p class="formats-text">CSV &bull; Excel &bull; JSON &bull; Parquet</p>
-                        <p>or</p>
-                        <button class="btn btn-outline btn-browse" onclick="document.getElementById('file-input').click()">Browse Files</button>
-                        <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.tsv,.txt,.json,.jsonl,.ndjson,.parquet" hidden>
+                <!-- Data Sources Section -->
+                <section class="sources-section" id="sources-section">
+                    <div class="sources-header">
+                        <h2>Get Data</h2>
+                        <p>Connect to data from multiple sources to start building insights.</p>
+                    </div>
+                    
+                    <div class="connector-grid">
+                        <!-- Excel -->
+                        <div class="connector-tile" onclick="document.getElementById('file-input-excel').click()">
+                            <div class="connector-icon excel"><i class="fa-solid fa-file-excel"></i></div>
+                            <div class="connector-info">
+                                <h4>Excel Workbook</h4>
+                                <p>.xlsx, .xls</p>
+                            </div>
+                            <input type="file" id="file-input-excel" accept=".xlsx,.xls" hidden onchange="App.handleFileUpload(this.files)">
+                        </div>
+                        
+                        <!-- CSV -->
+                        <div class="connector-tile" onclick="document.getElementById('file-input-csv').click()">
+                            <div class="connector-icon csv"><i class="fa-solid fa-file-csv"></i></div>
+                            <div class="connector-info">
+                                <h4>Text / CSV</h4>
+                                <p>.csv, .tsv, .txt</p>
+                            </div>
+                            <input type="file" id="file-input-csv" accept=".csv,.tsv,.txt" hidden onchange="App.handleFileUpload(this.files)">
+                        </div>
+
+                        <!-- JSON -->
+                        <div class="connector-tile" onclick="document.getElementById('file-input-json').click()">
+                            <div class="connector-icon json"><i class="fa-brands fa-js"></i></div>
+                            <div class="connector-info">
+                                <h4>JSON Data</h4>
+                                <p>.json, .ndjson</p>
+                            </div>
+                            <input type="file" id="file-input-json" accept=".json,.jsonl,.ndjson" hidden onchange="App.handleFileUpload(this.files)">
+                        </div>
+
+                        <!-- Parquet -->
+                        <div class="connector-tile" onclick="document.getElementById('file-input-parquet').click()">
+                            <div class="connector-icon parquet"><i class="fa-solid fa-database"></i></div>
+                            <div class="connector-info">
+                                <h4>Parquet</h4>
+                                <p>.parquet</p>
+                            </div>
+                            <input type="file" id="file-input-parquet" accept=".parquet" hidden onchange="App.handleFileUpload(this.files)">
+                        </div>
+
+                        <!-- SQLite -->
+                        <div class="connector-tile" onclick="document.getElementById('file-input-sqlite').click()">
+                            <div class="connector-icon sqlite"><i class="fa-solid fa-server"></i></div>
+                            <div class="connector-info">
+                                <h4>SQLite Database</h4>
+                                <p>.sqlite, .db</p>
+                            </div>
+                            <input type="file" id="file-input-sqlite" accept=".sqlite,.db" hidden onchange="App.handleFileUpload(this.files)">
+                        </div>
+
+                        <!-- Drag & Drop Fallback -->
+                        <div class="connector-tile dropzone-tile" id="drop-zone">
+                            <div class="connector-icon generic"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                            <div class="connector-info">
+                                <h4>Drag & Drop</h4>
+                                <p>Drop any supported file here</p>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="upload-progress hidden" id="upload-progress">
@@ -180,31 +238,20 @@
             <aside class="sidebar">
                 <div class="sidebar-section">
                     <h4>OVERVIEW</h4>
-                    <a href="#" class="active"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+                    <a href="#" id="nav-dashboard" class="active" onclick="App.switchView('dashboard')"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
                 </div>
                 <div class="sidebar-section">
                     <h4>DATA</h4>
-                    <a href="#"><i class="fa-solid fa-database"></i> Dataset</a>
-                    <a href="#"><i class="fa-solid fa-shield-heart"></i> Quality</a>
-                    <a href="#"><i class="fa-solid fa-broom"></i> Cleaning</a>
-                    <a href="#"><i class="fa-solid fa-code-branch"></i> Transformation</a>
+                    <a href="#" id="nav-quality" onclick="App.switchView('quality')"><i class="fa-solid fa-shield-heart"></i> Quality</a>
                 </div>
                 <div class="sidebar-section">
                     <h4>ANALYSIS</h4>
-                    <a href="#"><i class="fa-solid fa-calculator"></i> Statistics</a>
-                    <a href="#"><i class="fa-solid fa-magnifying-glass-chart"></i> EDA</a>
-                    <a href="#"><i class="fa-solid fa-lightbulb"></i> Findings</a>
-                </div>
-                <div class="sidebar-section">
-                    <h4>BUSINESS INTELLIGENCE</h4>
-                    <a href="#"><i class="fa-solid fa-chart-line"></i> KPIs</a>
-                    <a href="#"><i class="fa-solid fa-chart-pie"></i> Charts</a>
-                    <a href="#"><i class="fa-solid fa-border-all"></i> Dashboard</a>
+                    <a href="#" id="nav-statistics" onclick="App.switchView('statistics')"><i class="fa-solid fa-calculator"></i> Statistics</a>
+                    <a href="#" id="nav-eda" onclick="App.switchView('eda')"><i class="fa-solid fa-magnifying-glass-chart"></i> EDA</a>
                 </div>
                 <div class="sidebar-section">
                     <h4>OUTPUT</h4>
-                    <a href="#"><i class="fa-solid fa-file-pdf"></i> Reports</a>
-                    <a href="#"><i class="fa-solid fa-robot"></i> Automation</a>
+                    <a href="#" id="nav-reports" onclick="App.switchView('reports')"><i class="fa-solid fa-file-pdf"></i> Reports</a>
                 </div>
             </aside>
             <div class="main-content">
@@ -212,7 +259,7 @@
                     <h2 id="results-filename">Dataset Analysis</h2>
                 </div>
                 <div class="content-body" id="results-body">
-                    <div class="card result-card">
+                    <div class="card result-card" id="view-panel-dashboard">
                         <div class="bi-report-header">
                             <div>
                                 <h3><i class="fa-solid fa-chart-line"></i> BI Dashboard</h3>
@@ -220,14 +267,72 @@
                             </div>
                             <div class="bi-report-downloads" id="bi-report-downloads"></div>
                         </div>
-                        <div class="stats-cards bi-report-kpis" id="bi-report-kpis"></div>
+                        <div class="bi-dashboard-grid" id="bi-dashboard-container">
+                            <!-- KPIs and Charts will be injected here via app.js -->
+                        </div>
                         <section class="bi-findings-section" id="bi-report-findings-section">
                             <h3>Key findings</h3>
                             <ul class="bi-findings-list" id="bi-report-findings"></ul>
                         </section>
-                        <div class="bi-chart-grid" id="bi-report-charts"></div>
                         <div class="bi-report-tables" id="bi-report-tables"></div>
                         <p class="bi-report-status" id="bi-report-status">Generate a BI report to view metrics, charts, and export files.</p>
+                    </div>
+
+                    <div class="card result-card hidden" id="view-panel-quality">
+                        <div class="bi-report-header">
+                            <div>
+                                <h3><i class="fa-solid fa-shield-heart"></i> Data Quality Analysis</h3>
+                                <p>Comprehensive assessment of missing values, outliers, and schema anomalies.</p>
+                            </div>
+                            <div>
+                                <button class="btn btn-primary" onclick="App.runQualityAnalysis()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                            </div>
+                        </div>
+                        <div id="quality-results-container" style="margin-top: 1rem;">
+                            <p class="empty-text">Click "Run Analysis" to generate the quality report.</p>
+                        </div>
+                    </div>
+
+                    <div class="card result-card hidden" id="view-panel-statistics">
+                        <div class="bi-report-header">
+                            <div>
+                                <h3><i class="fa-solid fa-calculator"></i> Statistical Summary</h3>
+                                <p>Descriptive statistics and aggregations for all numeric columns.</p>
+                            </div>
+                            <div>
+                                <button class="btn btn-primary" onclick="App.runStatistics()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                            </div>
+                        </div>
+                        <div id="statistics-results-container" style="margin-top: 1rem;">
+                            <p class="empty-text">Click "Run Analysis" to generate the statistical summary.</p>
+                        </div>
+                    </div>
+
+                    <div class="card result-card hidden" id="view-panel-eda">
+                        <div class="bi-report-header">
+                            <div>
+                                <h3><i class="fa-solid fa-magnifying-glass-chart"></i> Exploratory Data Analysis (EDA)</h3>
+                                <p>Advanced correlations and distributional insights.</p>
+                            </div>
+                            <div>
+                                <button class="btn btn-primary" onclick="App.runEDA()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                            </div>
+                        </div>
+                        <div id="eda-results-container" style="margin-top: 1rem;">
+                            <p class="empty-text">Click "Run Analysis" to generate the EDA report.</p>
+                        </div>
+                    </div>
+
+                    <div class="card result-card hidden" id="view-panel-reports">
+                        <div class="bi-report-header">
+                            <div>
+                                <h3><i class="fa-solid fa-file-pdf"></i> Reports & Exports</h3>
+                                <p>Download generated artifacts.</p>
+                            </div>
+                        </div>
+                        <div id="reports-results-container" style="margin-top: 1rem; display:flex; gap:10px;">
+                            <p class="empty-text">Run the Automated Analysis first to enable exports.</p>
+                        </div>
                     </div>
                     <div class="card result-card" id="analysis-status-card">
                         <h3>Analysis status</h3>

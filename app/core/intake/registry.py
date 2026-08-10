@@ -4,6 +4,7 @@ from .csv_importer import CSVImporter
 from .excel_importer import ExcelImporter
 from .json_importer import JSONImporter
 from .parquet_importer import ParquetImporter
+from .sqlite_importer import SQLiteImporter
 
 class ImporterRegistry:
     def __init__(self):
@@ -12,7 +13,8 @@ class ImporterRegistry:
             'delimited': CSVImporter(),
             'excel': ExcelImporter(),
             'json': JSONImporter(),
-            'parquet': ParquetImporter()
+            'parquet': ParquetImporter(),
+            'sqlite': SQLiteImporter()
         }
 
     def get_importer(self, file_type: str) -> BaseImporter:

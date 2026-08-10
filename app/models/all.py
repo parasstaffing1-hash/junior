@@ -106,3 +106,30 @@ class AuditEvent(Base):
     before_stats = Column(JSON, nullable=True)
     after_stats = Column(JSON, nullable=True)
     timestamp = Column(DateTime, default=utc_now)
+
+class AutomationRun(Base):
+    __tablename__ = "automation_runs"
+    
+    id = Column(String, primary_key=True, default=generate_uuid)
+    dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False)
+    source_version_id = Column(String, ForeignKey("dataset_versions.id"), nullable=True)
+    action = Column(String, nullable=False)
+    parameters = Column(JSON, nullable=True)
+    idempotency_key = Column(String, nullable=True, index=True)
+    correlation_id = Column(String, nullable=True)
+    status = Column(String, nullable=False)
+    error_details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+class ReportDefinition(Base):
+    __tablename__ = "report_definitions"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False)
+    title = Column(String, nullable=False)
+    definition_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+

@@ -34,10 +34,15 @@ def detect_file_type(path: Path, original_filename: str) -> str:
     if ext in ['json', 'jsonl', 'ndjson']:
         return 'json'
 
+    if head.startswith(b'SQLite format 3\x00') or ext in ['sqlite', 'db', 'sqlite3']:
+        return 'sqlite'
+
     # Fallback to extension if magic bytes are inconclusive (e.g. some CSVs might look like anything)
     if ext == 'parquet':
         return 'parquet'
     if ext in ['xlsx', 'xls']:
         return 'excel'
+    if ext in ['sqlite', 'db', 'sqlite3']:
+        return 'sqlite'
 
     raise ValueError(f"Unsupported file type for extension .{ext}")
