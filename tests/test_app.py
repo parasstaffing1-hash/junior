@@ -115,6 +115,29 @@ def test_bi_report_dashboard_filters_and_exports(client):
     assert filtered.json()["applied_filters"] == {"country": "Canada"}
 
 
+def test_bi_report_recognizes_walmart_style_sales_and_store_fields(client):
+    files = {
+        "file": (
+            "Walmart_Sales.csv",
+            b"Store,Date,Weekly_Sales,Holiday_Flag,Temperature,Fuel_Price,CPI,Unemployment\n"
+            b"1,05-02-2010,100,0,42.31,2.572,211.09,8.106\n"
+            b"1,12-02-2010,200,1,38.51,2.548,211.24,8.106\n"
+            b"2,05-02-2010,300,0,45.00,2.600,211.09,7.900\n",
+            "text/csv",
+        )
+    }
+    imported = _import_dataset(client, files)
+    report = client.get(f"/api/v1/datasets/{imported['dataset_id']}/bi_report")
+    assert report.status_code == 200, report.text
+    body = report.json()
+    assert body["field_mapping"]["sales"] == "Weekly_Sales"
+    assert body["field_mapping"]["store"] == "Store"
+    assert {item["label"] for item in body["kpis"]} >= {"Total sales", "Average sales per record", "Stores covered"}
+    assert {item["title"] for item in body["charts"]} == {"Sales by store", "Sales trend over time"}
+    assert body["dashboard"]["layout_validation"]["valid"] is True
+    assert any(item["name"] == "store" for item in body["filters"])
+
+
 def test_unified_api_groups_and_full_automated_workflow(client):
     files = {
         "file": (

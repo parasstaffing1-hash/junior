@@ -129,6 +129,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: str | None = None,
         product: str | None = None,
         segment: str | None = None,
+        store: str | None = None,
     ):
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
@@ -142,7 +143,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 frame,
                 dataset_name=dataset.name,
                 source_version_id=version.id,
-                filters={"country": country, "product": product, "segment": segment},
+                filters={"country": country, "product": product, "segment": segment, "store": store},
                 output_dir=request.app.state.storage.root / dataset_id / "reports",
             )
         except Exception as exc:
@@ -154,8 +155,8 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             ) from exc
         return dataset, report
 
-    def public_bi_report(dataset_id: str, report: dict, *, country: str | None, product: str | None, segment: str | None):
-        query = urlencode({key: value for key, value in {"country": country, "product": product, "segment": segment}.items() if value})
+    def public_bi_report(dataset_id: str, report: dict, *, country: str | None, product: str | None, segment: str | None, store: str | None = None):
+        query = urlencode({key: value for key, value in {"country": country, "product": product, "segment": segment, "store": store}.items() if value})
         suffix = f"?{query}" if query else ""
         return {
             "report_id": report["report_id"],
@@ -323,6 +324,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: Optional[str] = Query(None),
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
+        store: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
         _, report = build_dataset_bi_report(
@@ -332,8 +334,9 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             country=country,
             product=product,
             segment=segment,
+            store=store,
         )
-        return public_bi_report(dataset_id, report, country=country, product=product, segment=segment)
+        return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
 
     def download_bi_report(
         dataset_id: str,
@@ -343,6 +346,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: str | None,
         product: str | None,
         segment: str | None,
+        store: str | None,
     ):
         dataset, report = build_dataset_bi_report(
             dataset_id,
@@ -351,6 +355,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             country=country,
             product=product,
             segment=segment,
+            store=store,
         )
         path = report["files"].get(kind)
         if not path:
@@ -370,9 +375,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: Optional[str] = Query(None),
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
+        store: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "html", country, product, segment)
+        return download_bi_report(dataset_id, request, db, "html", country, product, segment, store)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/pdf")
     def download_bi_report_pdf(
@@ -381,9 +387,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: Optional[str] = Query(None),
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
+        store: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment)
+        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment, store)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/xlsx")
     def download_bi_report_xlsx(
@@ -392,9 +399,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         country: Optional[str] = Query(None),
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
+        store: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment)
+        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment, store)
 
     @app.post("/api/v1/automated-analyst/analyze")
     def analyze_dataset(payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
@@ -405,13 +413,13 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return analyst.run_full_pipeline(dataset_id=dataset_id)
 
     @app.get("/api/v1/reports/{dataset_id}")
-    def get_standard_report(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), db: Session = Depends(get_db)):
-        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment)
-        return public_bi_report(dataset_id, report, country=country, product=product, segment=segment)
+    def get_standard_report(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), db: Session = Depends(get_db)):
+        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store)
+        return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
 
     @app.get("/api/v1/dashboards/{dataset_id}")
-    def get_standard_dashboard(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), db: Session = Depends(get_db)):
-        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment)
+    def get_standard_dashboard(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), db: Session = Depends(get_db)):
+        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store)
         return {"dashboard": _remove_artifact_paths(report["dashboard"]), "kpis": report["kpis"], "charts": _remove_artifact_paths(report["charts"]), "tables": report["tables"], "findings": report.get("findings", []), "source": report["source"]}
 
     @app.get("/api/v1/datasets/{dataset_id}/analysis")

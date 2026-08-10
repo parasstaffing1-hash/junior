@@ -21,13 +21,18 @@ def _utc_now() -> datetime:
 
 
 def _column_map(df: pd.DataFrame) -> dict[str, str]:
-    return {str(column).strip().casefold(): column for column in df.columns}
+    return {_normalize_field_name(column): column for column in df.columns}
+
+
+def _normalize_field_name(value: Any) -> str:
+    """Normalize common snake_case, spaced, and hyphenated field names."""
+    return "".join(character for character in str(value).casefold() if character.isalnum())
 
 
 def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     columns = _column_map(df)
     for candidate in candidates:
-        found = columns.get(candidate.strip().casefold())
+        found = columns.get(_normalize_field_name(candidate))
         if found is not None:
             return found
     return None
@@ -115,13 +120,17 @@ def build_bi_report(
     output_path = Path(output_dir).expanduser().resolve() / report_id if output_dir else None
     work = df.copy(deep=True)
     filter_source = df.copy(deep=False)
-    sales_column = _find_column(work, ["sales", "net sales", "revenue", "amount"])
+    sales_column = _find_column(work, ["sales", "weekly sales", "weekly_sales", "net sales", "revenue", "amount", "sales amount", "total sales"])
     profit_column = _find_column(work, ["profit", "gross profit", "net profit"])
     units_column = _find_column(work, ["units sold", "units", "quantity", "volume"])
-    date_column = _find_column(work, ["date", "order date", "transaction date", "month"])
+    date_column = _find_column(work, ["date", "order date", "transaction date", "week", "month"])
     country_column = _find_column(work, ["country", "geography", "region"])
     product_column = _find_column(work, ["product", "product name", "item"])
     segment_column = _find_column(work, ["segment", "customer segment", "category"])
+    store_column = _find_column(work, ["store", "store id", "store_id", "location", "location id"])
+    holiday_column = _find_column(work, ["holiday flag", "holiday_flag", "holiday", "is holiday"])
+    location_column = country_column or store_column
+    location_label = "country" if country_column else "store" if store_column else None
 
     numeric_columns = []
     for column in [sales_column, profit_column, units_column]:
@@ -130,15 +139,20 @@ def build_bi_report(
             numeric_columns.append(column)
 
     applied_filters = {}
-    for filter_name, column in {
+    filter_columns = {
         "country": country_column,
         "product": product_column,
         "segment": segment_column,
-    }.items():
+    }
+    if store_column:
+        filter_columns["store"] = store_column
+    for filter_name, column in filter_columns.items():
         requested = (filters or {}).get(filter_name)
+        if filter_name == "store" and not requested and not country_column:
+            requested = (filters or {}).get("country")
         if requested and column:
             work = work[work[column].astype(str) == str(requested)]
-            applied_filters[filter_name] = str(requested)
+            applied_filters[filter_name if filter_name != "store" or "store" in (filters or {}) else "country"] = str(requested)
 
     source = {
         "type": "dataset_version",
@@ -208,6 +222,29 @@ def build_bi_report(
         )
         kpis.append(content)
         kpi_by_ref["kpi:profit_margin"] = content
+    if sales_column:
+        sales_values = pd.to_numeric(work[sales_column], errors="coerce").dropna()
+        average_sales = float(sales_values.mean()) if not sales_values.empty else None
+        content = {
+            "label": "Average sales per record",
+            "value": _jsonable(average_sales),
+            "formatted_value": _format_number(average_sales, currency=True),
+            "source_ref": "kpi:average_sales",
+            "definition": {"definition_type": "average", "column": sales_column},
+        }
+        kpis.append(content)
+        kpi_by_ref["kpi:average_sales"] = content
+    if store_column:
+        stores = work[store_column].dropna().astype(str).nunique()
+        content = {
+            "label": "Stores covered",
+            "value": int(stores),
+            "formatted_value": _format_number(stores),
+            "source_ref": "kpi:stores",
+            "definition": {"definition_type": "distinct_count", "column": store_column},
+        }
+        kpis.append(content)
+        kpi_by_ref["kpi:stores"] = content
 
     charts: list[dict[str, Any]] = []
     chart_by_ref: dict[str, dict[str, Any]] = {}
@@ -218,24 +255,26 @@ def build_bi_report(
         charts.append(content)
         chart_by_ref[source_ref] = content
 
-    if sales_column and country_column:
-        chart_output = _chart_path(output_path, "sales_by_country") if output_path else None
+    if sales_column and location_column:
+        location_chart_name = "sales_by_country" if country_column else "sales_by_store"
+        location_source_ref = "chart:sales_by_country" if country_column else "chart:sales_by_store"
+        chart_output = _chart_path(output_path, location_chart_name) if output_path else None
         try:
             spec = build_bar_chart(
                     work,
-                    category_column=country_column,
+                    category_column=location_column,
                     value_column=sales_column,
                     aggregation="sum",
                     top_n=10,
-                    title="Sales by country",
+                    title=f"Sales by {location_label}",
                     y_label="Sales",
                     output_path=chart_output,
                 )
             if chart_output:
                 spec["artifact_path"] = chart_output
-            add_chart("chart:sales_by_country", spec)
+            add_chart(location_source_ref, spec)
         except Exception as exc:
-            notes.append(f"Sales by country chart unavailable: {exc}")
+            notes.append(f"Sales by {location_label} chart unavailable: {exc}")
 
     if profit_column and product_column:
         chart_output = _chart_path(output_path, "profit_by_product") if output_path else None
@@ -282,15 +321,16 @@ def build_bi_report(
 
     tables: list[dict[str, Any]] = []
     table_by_ref: dict[str, dict[str, Any]] = {}
-    if sales_column and country_column:
-        grouped = work.dropna(subset=[country_column, sales_column]).groupby(country_column, dropna=False)[sales_column].sum().sort_values(ascending=False).head(10)
+    if sales_column and location_column:
+        grouped = work.dropna(subset=[location_column, sales_column]).groupby(location_column, dropna=False)[sales_column].sum().sort_values(ascending=False).head(10)
+        location_key = "country" if country_column else "store"
         content = _table(
-            [{"country": str(index), "sales": float(value)} for index, value in grouped.items()],
-            ["country", "sales"],
+            [{location_key: str(index), "sales": float(value)} for index, value in grouped.items()],
+            [location_key, "sales"],
         )
-        content["source_ref"] = "table:top_countries"
+        content["source_ref"] = "table:top_countries" if country_column else "table:top_stores"
         tables.append(content)
-        table_by_ref["table:top_countries"] = content
+        table_by_ref[content["source_ref"]] = content
     if profit_column and product_column:
         grouped = work.dropna(subset=[product_column, profit_column]).groupby(product_column, dropna=False)[profit_column].sum().sort_values(ascending=False).head(10)
         content = _table(
@@ -316,9 +356,11 @@ def build_bi_report(
     total_sales = kpi_by_ref.get("kpi:total_sales", {}).get("value")
     total_profit = kpi_by_ref.get("kpi:total_profit", {}).get("value")
     margin = kpi_by_ref.get("kpi:profit_margin", {}).get("formatted_value")
+    sales_summary = f"Total sales are {_format_number(total_sales, currency=True)}" if total_sales is not None else "Total sales are not available"
+    profit_summary = f"Total profit is {_format_number(total_profit, currency=True)}" if total_profit is not None else "Profit is not available in this source"
     summary = (
         f"This BI report covers {len(work):,} rows from {dataset_name}. "
-        f"Total sales are {_format_number(total_sales, currency=True)} and total profit is {_format_number(total_profit, currency=True)}. "
+        f"{sales_summary} and {profit_summary}. "
         f"The calculated profit margin is {margin or 'not available'}."
     )
     if applied_filters:
@@ -349,7 +391,13 @@ def build_bi_report(
         report_sections.append({
             "id": f"table_{index}",
             "section_type": "table",
-            "title": "Top " + ("countries by sales" if table["source_ref"] == "table:top_countries" else "products by profit"),
+            "title": "Top " + (
+                "countries by sales"
+                if table["source_ref"] == "table:top_countries"
+                else "stores by sales"
+                if table["source_ref"] == "table:top_stores"
+                else "products by profit"
+            ),
             "source_ref": table["source_ref"],
             "position": 80 + index,
         })
@@ -417,16 +465,20 @@ def build_bi_report(
     if not layout_validation["valid"]:
         raise ValueError(f"Generated BI dashboard layout is invalid: {layout_validation['collisions']}")
 
+    dashboard_filters = [
+        {"name": "country", "column": country_column, "values": sorted(filter_source[country_column].dropna().astype(str).unique().tolist()) if country_column else []},
+        {"name": "product", "column": product_column, "values": sorted(filter_source[product_column].dropna().astype(str).unique().tolist()) if product_column else []},
+        {"name": "segment", "column": segment_column, "values": sorted(filter_source[segment_column].dropna().astype(str).unique().tolist()) if segment_column else []},
+    ]
+    if store_column:
+        dashboard_filters.append({"name": "store", "column": store_column, "values": sorted(filter_source[store_column].dropna().astype(str).unique().tolist())})
+
     dashboard = {
         "id": f"dashboard:{report_id}",
         "title": report["title"],
         "description": report["description"],
         "source": source,
-        "filters": [
-            {"name": "country", "column": country_column, "values": sorted(filter_source[country_column].dropna().astype(str).unique().tolist()) if country_column else []},
-            {"name": "product", "column": product_column, "values": sorted(filter_source[product_column].dropna().astype(str).unique().tolist()) if product_column else []},
-            {"name": "segment", "column": segment_column, "values": sorted(filter_source[segment_column].dropna().astype(str).unique().tolist()) if segment_column else []},
-        ],
+        "filters": dashboard_filters,
         "widgets": widgets,
         "layout_validation": layout_validation,
     }
@@ -457,6 +509,8 @@ def build_bi_report(
             "country": country_column,
             "product": product_column,
             "segment": segment_column,
+            "store": store_column,
+            "holiday": holiday_column,
         },
         "filters": dashboard["filters"],
         "applied_filters": applied_filters,
