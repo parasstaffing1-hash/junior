@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated Data Analyst v1.0</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Background Elements -->
+    <div class="bg-shape shape-1"></div>
+    <div class="bg-shape shape-2"></div>
+    
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+        <div class="nav-brand">
+            <i class="fa-solid fa-chart-network"></i> Automated Data Analyst
+        </div>
+        <div class="nav-links">
+            <a href="#" class="active" onclick="App.navigate('home')">Datasets</a>
+            <a href="#">Automated Analyst</a>
+            <a href="#">Reports</a>
+            <a href="#">Automation</a>
+        </div>
+        <div class="nav-actions">
+            <a href="#"><i class="fa-solid fa-gear"></i> Settings</a>
+            <a href="#"><i class="fa-solid fa-user-circle"></i> Workspace</a>
+        </div>
+    </nav>
+
+    <div class="container" id="app-container">
+        
+        <!-- ==============================
+             VIEW 1: LANDING & UPLOAD
+             ============================== -->
+        <div id="view-home" class="view-section active">
+            <header class="hero">
+                <h1>AUTOMATED <span>DATA ANALYST</span></h1>
+                <p>Upload your business data. Get cleaned data, insights, KPIs, dashboards and reports automatically.</p>
+            </header>
+
+            <main>
+                <!-- Upload Section -->
+                <section class="card upload-section" id="upload-section">
+                    <div class="drop-zone" id="drop-zone">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                        <h3>Drag & Drop Dataset</h3>
+                        <p class="formats-text">CSV &bull; Excel &bull; JSON &bull; Parquet</p>
+                        <p>or</p>
+                        <button class="btn btn-outline btn-browse" onclick="document.getElementById('file-input').click()">Browse Files</button>
+                        <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.tsv,.txt,.json,.jsonl,.ndjson,.parquet" hidden>
+                    </div>
+                    
+                    <div class="upload-progress hidden" id="upload-progress">
+                        <div class="spinner"></div>
+                        <p id="upload-status-text">Uploading and inspecting dataset...</p>
+                    </div>
+                </section>
+
+                <!-- Excel Sheet Selection Modal/Section -->
+                <section class="card excel-selection-section hidden" id="excel-selection-section">
+                    <h3><i class="fa-solid fa-file-excel"></i> Workbook detected</h3>
+                    <p id="excel-sheet-count">Select a sheet to analyze:</p>
+                    <div class="sheet-list" id="sheet-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </section>
+
+                <!-- Recent Datasets -->
+                <section class="recent-datasets" id="recent-datasets-section">
+                    <h3>RECENT DATASETS</h3>
+                    <div class="dataset-grid" id="recent-datasets-grid">
+                        <p class="empty-text">No datasets yet. Upload your first dataset above.</p>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- ==============================
+             VIEW 2: DATASET OVERVIEW
+             ============================== -->
+        <div id="view-dataset-overview" class="view-section hidden">
+            <div class="overview-header">
+                <div>
+                    <h2 id="overview-filename">Dataset.xlsx</h2>
+                    <p class="version-badge">Current Version: V1</p>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-outline" onclick="App.exploreManually()">
+                        <i class="fa-solid fa-sliders"></i> Explore Manually
+                    </button>
+                    <button class="btn btn-outline" onclick="App.generateBIReport()">
+                        <i class="fa-solid fa-chart-column"></i> Generate BI Report
+                    </button>
+                    <button class="btn btn-primary" onclick="App.runAutoAnalyst()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Run Automated Analysis
+                    </button>
+                </div>
+            </div>
+
+            <div class="stats-cards">
+                <div class="stat-card">
+                    <i class="fa-solid fa-list-ol"></i>
+                    <div>
+                        <p>Rows</p>
+                        <h4 id="overview-rows">--</h4>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <i class="fa-solid fa-columns"></i>
+                    <div>
+                        <p>Columns</p>
+                        <h4 id="overview-cols">--</h4>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <i class="fa-solid fa-heart-pulse"></i>
+                    <div>
+                        <p>Health Score</p>
+                        <h4 id="overview-health">--</h4>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <div>
+                        <p>Missing</p>
+                        <h4 id="overview-missing">--</h4>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <i class="fa-solid fa-copy"></i>
+                    <div>
+                        <p>Duplicates</p>
+                        <h4 id="overview-duplicates">--</h4>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <i class="fa-solid fa-shield-halved"></i>
+                    <div>
+                        <p>Validation</p>
+                        <h4 id="overview-validation">Pending</h4>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card preview-card">
+                <h3><i class="fa-solid fa-table"></i> Data Preview</h3>
+                <div class="table-container">
+                    <table id="overview-preview-table">
+                        <thead><tr id="overview-preview-thead"></tr></thead>
+                        <tbody id="overview-preview-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Automated Analysis Progress Modal -->
+            <div class="progress-modal hidden" id="analysis-progress">
+                <div class="progress-box">
+                    <h3 id="progress-title">Analyzing Dataset...</h3>
+                    <ul class="progress-steps" id="progress-steps">
+                        <li class="step-done"><i class="fa-solid fa-check text-green"></i> Dataset imported</li>
+                        <li class="step-active"><div class="spinner-small"></div> Schema detection</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Data quality analysis</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Missing values analysis</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Duplicates analysis</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Cleaning recommendations</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Statistics & EDA</li>
+                        <li class="step-pending"><i class="fa-regular fa-circle"></i> KPIs & Dashboards</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==============================
+             VIEW 3: RESULTS APPLICATION SHELL
+             ============================== -->
+        <div id="view-results-shell" class="view-section hidden results-layout">
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h4>OVERVIEW</h4>
+                    <a href="#" class="active"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+                </div>
+                <div class="sidebar-section">
+                    <h4>DATA</h4>
+                    <a href="#"><i class="fa-solid fa-database"></i> Dataset</a>
+                    <a href="#"><i class="fa-solid fa-shield-heart"></i> Quality</a>
+                    <a href="#"><i class="fa-solid fa-broom"></i> Cleaning</a>
+                    <a href="#"><i class="fa-solid fa-code-branch"></i> Transformation</a>
+                </div>
+                <div class="sidebar-section">
+                    <h4>ANALYSIS</h4>
+                    <a href="#"><i class="fa-solid fa-calculator"></i> Statistics</a>
+                    <a href="#"><i class="fa-solid fa-magnifying-glass-chart"></i> EDA</a>
+                    <a href="#"><i class="fa-solid fa-lightbulb"></i> Findings</a>
+                </div>
+                <div class="sidebar-section">
+                    <h4>BUSINESS INTELLIGENCE</h4>
+                    <a href="#"><i class="fa-solid fa-chart-line"></i> KPIs</a>
+                    <a href="#"><i class="fa-solid fa-chart-pie"></i> Charts</a>
+                    <a href="#"><i class="fa-solid fa-border-all"></i> Dashboard</a>
+                </div>
+                <div class="sidebar-section">
+                    <h4>OUTPUT</h4>
+                    <a href="#"><i class="fa-solid fa-file-pdf"></i> Reports</a>
+                    <a href="#"><i class="fa-solid fa-robot"></i> Automation</a>
+                </div>
+            </aside>
+            <div class="main-content">
+                <div class="content-header">
+                    <h2 id="results-filename">Dataset Analysis</h2>
+                </div>
+                <div class="content-body" id="results-body">
+                    <div class="card result-card">
+                        <div class="bi-report-header">
+                            <div>
+                                <h3><i class="fa-solid fa-chart-line"></i> BI Dashboard</h3>
+                                <p id="bi-report-subtitle">Source-backed business performance overview</p>
+                            </div>
+                            <div class="bi-report-downloads" id="bi-report-downloads"></div>
+                        </div>
+                        <div class="stats-cards bi-report-kpis" id="bi-report-kpis"></div>
+                        <section class="bi-findings-section" id="bi-report-findings-section">
+                            <h3>Key findings</h3>
+                            <ul class="bi-findings-list" id="bi-report-findings"></ul>
+                        </section>
+                        <div class="bi-chart-grid" id="bi-report-charts"></div>
+                        <div class="bi-report-tables" id="bi-report-tables"></div>
+                        <p class="bi-report-status" id="bi-report-status">Generate a BI report to view metrics, charts, and export files.</p>
+                    </div>
+                    <div class="card result-card" id="analysis-status-card">
+                        <h3>Analysis status</h3>
+                        <div class="metrics-grid" id="final-metrics-grid" style="margin-top:20px;">
+                            <!-- Analysis status injected via JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
