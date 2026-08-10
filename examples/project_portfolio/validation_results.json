@@ -1,0 +1,720 @@
+{
+  "status": "COMPLETED",
+  "count": 20,
+  "passed": 20,
+  "failed": 0,
+  "projects": [
+    {
+      "project": {
+        "id": "personal_expense_tracker",
+        "name": "Personal Expense Tracker",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "operations"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5212,
+          "pdf_bytes": 126765,
+          "xlsx_bytes": 8688
+        }
+      },
+      "artifacts": {
+        "html": "personal_expense_tracker/report.html",
+        "pdf": "personal_expense_tracker/report.pdf",
+        "xlsx": "personal_expense_tracker/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "category": "category",
+        "amount": "amount",
+        "merchant": "merchant",
+        "payment_method": "payment_method"
+      }
+    },
+    {
+      "project": {
+        "id": "superstore_sales_dashboard",
+        "name": "Superstore Sales Dashboard",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "sales_performance"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 3,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 6173,
+          "pdf_bytes": 163365,
+          "xlsx_bytes": 8715
+        }
+      },
+      "artifacts": {
+        "html": "superstore_sales_dashboard/report.html",
+        "pdf": "superstore_sales_dashboard/report.pdf",
+        "xlsx": "superstore_sales_dashboard/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "region": "region",
+        "category": "category",
+        "sales": "sales",
+        "profit": "profit",
+        "quantity": "quantity"
+      }
+    },
+    {
+      "project": {
+        "id": "movie_ratings_exploration",
+        "name": "Movie Ratings Exploration",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4935,
+          "pdf_bytes": 101189,
+          "xlsx_bytes": 8651
+        }
+      },
+      "artifacts": {
+        "html": "movie_ratings_exploration/report.html",
+        "pdf": "movie_ratings_exploration/report.pdf",
+        "xlsx": "movie_ratings_exploration/report.xlsx"
+      },
+      "field_mapping": {
+        "title": "title",
+        "genre": "genre",
+        "rating": "rating",
+        "runtime": "runtime",
+        "year": "release_year"
+      }
+    },
+    {
+      "project": {
+        "id": "public_health_trend_analysis",
+        "name": "Public Health Trend Analysis",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "sales_performance"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5045,
+          "pdf_bytes": 123207,
+          "xlsx_bytes": 8588
+        }
+      },
+      "artifacts": {
+        "html": "public_health_trend_analysis/report.html",
+        "pdf": "public_health_trend_analysis/report.pdf",
+        "xlsx": "public_health_trend_analysis/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "region": "region",
+        "cases": "cases",
+        "deaths": "deaths"
+      }
+    },
+    {
+      "project": {
+        "id": "weather_pattern_analysis",
+        "name": "Weather Pattern Analysis",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "operations"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4994,
+          "pdf_bytes": 114923,
+          "xlsx_bytes": 8594
+        }
+      },
+      "artifacts": {
+        "html": "weather_pattern_analysis/report.html",
+        "pdf": "weather_pattern_analysis/report.pdf",
+        "xlsx": "weather_pattern_analysis/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "city": "city",
+        "temperature": "temperature",
+        "rainfall": "rainfall",
+        "humidity": "humidity"
+      }
+    },
+    {
+      "project": {
+        "id": "media_catalog_analysis",
+        "name": "Netflix / Spotify Catalog Analysis",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4976,
+          "pdf_bytes": 94973,
+          "xlsx_bytes": 8691
+        }
+      },
+      "artifacts": {
+        "html": "media_catalog_analysis/report.html",
+        "pdf": "media_catalog_analysis/report.pdf",
+        "xlsx": "media_catalog_analysis/report.xlsx"
+      },
+      "field_mapping": {
+        "title": "title",
+        "content_type": "content_type",
+        "genre": "genre",
+        "country": "country",
+        "release_year": "release_year",
+        "rating": "rating",
+        "duration": "duration"
+      }
+    },
+    {
+      "project": {
+        "id": "student_performance",
+        "name": "Student Performance Analysis",
+        "category": "Beginner",
+        "difficulty": "Beginner",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4509,
+          "pdf_bytes": 84255,
+          "xlsx_bytes": 8452
+        }
+      },
+      "artifacts": {
+        "html": "student_performance/report.html",
+        "pdf": "student_performance/report.pdf",
+        "xlsx": "student_performance/report.xlsx"
+      },
+      "field_mapping": {
+        "student_id": "student_id",
+        "study_hours": "study_hours",
+        "math_score": "math_score",
+        "reading_score": "reading_score",
+        "writing_score": "writing_score",
+        "passed": "passed",
+        "parent_education": "parent_education"
+      }
+    },
+    {
+      "project": {
+        "id": "ecommerce_funnel",
+        "name": "E-commerce Funnel Drop-off",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "ecommerce_conversion"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 4,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5568,
+          "pdf_bytes": 125215,
+          "xlsx_bytes": 8760
+        }
+      },
+      "artifacts": {
+        "html": "ecommerce_funnel/report.html",
+        "pdf": "ecommerce_funnel/report.pdf",
+        "xlsx": "ecommerce_funnel/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "channel": "channel",
+        "visitors": "visitors",
+        "product_views": "product_views",
+        "add_to_cart": "add_to_cart",
+        "checkout_started": "checkout_started",
+        "purchases": "purchases",
+        "revenue": "revenue",
+        "conversion_rate": "conversion_rate"
+      }
+    },
+    {
+      "project": {
+        "id": "hr_attrition",
+        "name": "HR Attrition Analysis",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4324,
+          "pdf_bytes": 83911,
+          "xlsx_bytes": 8448
+        }
+      },
+      "artifacts": {
+        "html": "hr_attrition/report.html",
+        "pdf": "hr_attrition/report.pdf",
+        "xlsx": "hr_attrition/report.xlsx"
+      },
+      "field_mapping": {
+        "employee_id": "employee_id",
+        "department": "department",
+        "overtime": "overtime",
+        "monthly_income": "monthly_income",
+        "tenure": "tenure",
+        "attrition": "attrition"
+      }
+    },
+    {
+      "project": {
+        "id": "customer_rfm_segmentation",
+        "name": "Customer Segmentation with RFM",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "operations"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 4,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4786,
+          "pdf_bytes": 106321,
+          "xlsx_bytes": 8558
+        }
+      },
+      "artifacts": {
+        "html": "customer_rfm_segmentation/report.html",
+        "pdf": "customer_rfm_segmentation/report.pdf",
+        "xlsx": "customer_rfm_segmentation/report.xlsx"
+      },
+      "field_mapping": {
+        "customer_id": "customer_id",
+        "rfm_segment": "rfm_segment",
+        "monetary_value": "monetary_value",
+        "customer_count": "customer_count",
+        "recency_days": "recency_days",
+        "frequency": "frequency"
+      }
+    },
+    {
+      "project": {
+        "id": "ab_test_analysis",
+        "name": "A/B Test Analysis",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "executive"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 4,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4294,
+          "pdf_bytes": 84898,
+          "xlsx_bytes": 8411
+        }
+      },
+      "artifacts": {
+        "html": "ab_test_analysis/report.html",
+        "pdf": "ab_test_analysis/report.pdf",
+        "xlsx": "ab_test_analysis/report.xlsx"
+      },
+      "field_mapping": {
+        "visitor_id": "visitor_id",
+        "experiment_group": "experiment_group",
+        "converted": "converted",
+        "revenue": "revenue"
+      }
+    },
+    {
+      "project": {
+        "id": "website_traffic_dashboard",
+        "name": "Website Traffic Dashboard",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "ecommerce_conversion"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 4,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5497,
+          "pdf_bytes": 123897,
+          "xlsx_bytes": 8765
+        }
+      },
+      "artifacts": {
+        "html": "website_traffic_dashboard/report.html",
+        "pdf": "website_traffic_dashboard/report.pdf",
+        "xlsx": "website_traffic_dashboard/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "source": "source",
+        "sessions": "sessions",
+        "bounce_rate": "bounce_rate",
+        "conversions": "conversions",
+        "pageviews": "pageviews",
+        "conversion_rate": "conversion_rate"
+      }
+    },
+    {
+      "project": {
+        "id": "loan_default_risk",
+        "name": "Loan Default Risk Analysis",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5006,
+          "pdf_bytes": 105099,
+          "xlsx_bytes": 8623
+        }
+      },
+      "artifacts": {
+        "html": "loan_default_risk/report.html",
+        "pdf": "loan_default_risk/report.pdf",
+        "xlsx": "loan_default_risk/report.xlsx"
+      },
+      "field_mapping": {
+        "loan_id": "loan_id",
+        "income": "income",
+        "loan_amount": "loan_amount",
+        "credit_score": "credit_score",
+        "defaulted": "defaulted",
+        "purpose": "purpose",
+        "credit_band": "credit_band"
+      }
+    },
+    {
+      "project": {
+        "id": "sales_forecasting",
+        "name": "Sales Forecasting",
+        "category": "Student",
+        "difficulty": "Intermediate",
+        "template_id": "sales_performance"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 9041,
+          "pdf_bytes": 144940,
+          "xlsx_bytes": 8700
+        }
+      },
+      "artifacts": {
+        "html": "sales_forecasting/report.html",
+        "pdf": "sales_forecasting/report.pdf",
+        "xlsx": "sales_forecasting/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "region": "region",
+        "sales": "sales",
+        "forecast_baseline": "forecast_baseline"
+      }
+    },
+    {
+      "project": {
+        "id": "customer_churn_prediction",
+        "name": "Customer Churn Prediction",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4866,
+          "pdf_bytes": 82826,
+          "xlsx_bytes": 8607
+        }
+      },
+      "artifacts": {
+        "html": "customer_churn_prediction/report.html",
+        "pdf": "customer_churn_prediction/report.pdf",
+        "xlsx": "customer_churn_prediction/report.xlsx"
+      },
+      "field_mapping": {
+        "customer_id": "customer_id",
+        "tenure": "tenure",
+        "monthly_charges": "monthly_charges",
+        "support_tickets": "support_tickets",
+        "contract": "contract",
+        "churned": "churned",
+        "tenure_band": "tenure_band"
+      }
+    },
+    {
+      "project": {
+        "id": "fraud_detection",
+        "name": "Fraud Detection Analysis",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "operations"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5380,
+          "pdf_bytes": 115800,
+          "xlsx_bytes": 8706
+        }
+      },
+      "artifacts": {
+        "html": "fraud_detection/report.html",
+        "pdf": "fraud_detection/report.pdf",
+        "xlsx": "fraud_detection/report.xlsx"
+      },
+      "field_mapping": {
+        "transaction_id": "transaction_id",
+        "date": "date",
+        "merchant_category": "merchant_category",
+        "amount": "amount",
+        "country": "country",
+        "is_fraud": "is_fraud"
+      }
+    },
+    {
+      "project": {
+        "id": "supply_chain_inventory",
+        "name": "Supply Chain and Inventory Optimization",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "operations"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 3,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5756,
+          "pdf_bytes": 125778,
+          "xlsx_bytes": 8588
+        }
+      },
+      "artifacts": {
+        "html": "supply_chain_inventory/report.html",
+        "pdf": "supply_chain_inventory/report.pdf",
+        "xlsx": "supply_chain_inventory/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "sku": "sku",
+        "product_name": "product_name",
+        "category": "category",
+        "warehouse": "warehouse",
+        "opening_stock": "opening_stock",
+        "purchases": "purchases",
+        "units_sold": "units_sold",
+        "closing_stock": "closing_stock",
+        "unit_cost": "unit_cost",
+        "unit_price": "unit_price",
+        "reorder_level": "reorder_level",
+        "inventory_value": "inventory_value",
+        "abc_class": "abc_class",
+        "stockout_risk": "stockout_risk",
+        "sell_through_rate": "sell_through_rate"
+      }
+    },
+    {
+      "project": {
+        "id": "stock_market_volatility",
+        "name": "Stock Market Trend and Volatility",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "sales_performance"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 5167,
+          "pdf_bytes": 118137,
+          "xlsx_bytes": 8701
+        }
+      },
+      "artifacts": {
+        "html": "stock_market_volatility/report.html",
+        "pdf": "stock_market_volatility/report.pdf",
+        "xlsx": "stock_market_volatility/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "ticker": "ticker",
+        "close": "close",
+        "volume": "volume",
+        "volatility": "volatility"
+      }
+    },
+    {
+      "project": {
+        "id": "healthcare_outcomes",
+        "name": "Healthcare Outcomes Analysis",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "root_cause"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 2,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 4364,
+          "pdf_bytes": 94643,
+          "xlsx_bytes": 8481
+        }
+      },
+      "artifacts": {
+        "html": "healthcare_outcomes/report.html",
+        "pdf": "healthcare_outcomes/report.pdf",
+        "xlsx": "healthcare_outcomes/report.xlsx"
+      },
+      "field_mapping": {
+        "patient_id": "patient_id",
+        "age": "age",
+        "glucose": "glucose",
+        "bmi": "bmi",
+        "blood_pressure": "blood_pressure",
+        "outcome": "outcome",
+        "age_band": "age_band"
+      }
+    },
+    {
+      "project": {
+        "id": "end_to_end_capstone",
+        "name": "End-to-End Capstone Dashboard",
+        "category": "Advanced",
+        "difficulty": "Advanced",
+        "template_id": "executive"
+      },
+      "status": "COMPLETED",
+      "validation": {
+        "valid": true,
+        "layout_valid": true,
+        "kpi_count": 3,
+        "chart_count": 3,
+        "table_count": 2,
+        "artifact_sizes": {
+          "html_bytes": 6544,
+          "pdf_bytes": 168358,
+          "xlsx_bytes": 8805
+        }
+      },
+      "artifacts": {
+        "html": "end_to_end_capstone/report.html",
+        "pdf": "end_to_end_capstone/report.pdf",
+        "xlsx": "end_to_end_capstone/report.xlsx"
+      },
+      "field_mapping": {
+        "date": "date",
+        "region": "region",
+        "channel": "channel",
+        "revenue": "revenue",
+        "marketing_spend": "marketing_spend",
+        "orders": "orders",
+        "nps": "nps",
+        "customer_id": "customer_id",
+        "marketing_roi": "marketing_roi"
+      }
+    }
+  ]
+}

@@ -13,7 +13,28 @@ def validate_expr(expr,names):
     for node in ast.walk(tree):
         if not isinstance(node,allowed):raise KPICalculationError("UNSAFE_FORMULA","Formula contains unsupported syntax.")
         if isinstance(node,ast.Name) and node.id not in names:raise KPICalculationError("UNKNOWN_COMPONENT","Formula references unknown component.",{"component":node.id})
-    return compile(tree,"<kpi>","eval")
+    return tree
+
+def _evaluate_expr(node, values):
+    """Evaluate a validated arithmetic expression without dynamic-code execution."""
+    if isinstance(node,ast.Expression): return _evaluate_expr(node.body,values)
+    if isinstance(node,ast.Constant): return float(node.value)
+    if isinstance(node,ast.Name): return float(values[node.id])
+    if isinstance(node,ast.UnaryOp):
+        operand=_evaluate_expr(node.operand,values)
+        if isinstance(node.op,ast.UAdd): return operand
+        if isinstance(node.op,ast.USub): return -operand
+    if isinstance(node,ast.BinOp):
+        left=_evaluate_expr(node.left,values);right=_evaluate_expr(node.right,values)
+        if isinstance(node.op,ast.Add): return left+right
+        if isinstance(node.op,ast.Sub): return left-right
+        if isinstance(node.op,ast.Mult): return left*right
+        if isinstance(node.op,ast.Div): return left/right
+        if isinstance(node.op,ast.Mod): return left%right
+        if isinstance(node.op,ast.Pow):
+            if abs(right)>1024:raise KPICalculationError("UNSAFE_FORMULA","Exponent exceeds the supported range.")
+            return left**right
+    raise KPICalculationError("UNSAFE_FORMULA","Formula contains unsupported syntax.")
 def _filter(df,filters):
     out=df
     for f in filters or []:
@@ -57,10 +78,12 @@ def _value(df,definition):
     elif typ=="formula":
         expr=definition.get("formula")
         if not expr:raise KPICalculationError("FORMULA_REQUIRED","Formula KPI requires formula.")
-        code=validate_expr(expr,set(vals))
+        expression_tree=validate_expr(expr,set(vals))
         if any(v is None for v in vals.values()):val=None
         else:
-            try:val=float(eval(code,{"__builtins__":{}},vals))
+            try:
+                val=float(_evaluate_expr(expression_tree,vals))
+                if not math.isfinite(val):raise KPICalculationError("NON_FINITE_RESULT","Formula produced a non-finite result.")
             except ZeroDivisionError:val=None
     else:raise KPICalculationError("INVALID_DEFINITION_TYPE","Unknown definition type.")
     return val,vals

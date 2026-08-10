@@ -8,5 +8,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 storage/
+!app/storage/
+!app/storage/__init__.py
+!app/storage/dataset_storage.py
 storage/temp/
 storage/**/*.part

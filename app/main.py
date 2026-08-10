@@ -18,6 +18,12 @@ from app.core.database import Base, SessionLocal, build_database, engine
 from app.core.automation.gateway import action_catalog, dispatch_plan
 from app.core.cleaning.recipe_engine import execute_recipe
 from app.core.dashboard.layout import validate_layout
+from app.core.dashboard.templates import (
+    DEFAULT_DASHBOARD_TEMPLATE_ID,
+    DashboardTemplateError,
+    get_dashboard_template,
+    list_dashboard_templates,
+)
 from app.core.eda.findings import detect_findings
 from app.core.eda.report import generate_eda_report
 from app.core.kpi.calculator import calculate_kpi
@@ -37,6 +43,9 @@ from app.orchestration.platform import (
 )
 from app.core.intake.importer import DatasetImporter
 from app.core.bi.report_service import build_bi_report
+from app.core.projects.catalog import get_project_spec, list_project_specs
+from app.core.projects.fixtures import build_project_fixture
+from app.core.projects.workbench import ProjectBuildError, build_project
 from app.storage.dataset_storage import DatasetStorage
 
 
@@ -67,7 +76,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     else:
         database_engine, session_factory = build_database(database_url)
 
-    Base.metadata.create_all(bind=database_engine)
+    # Isolated tests and local development may bootstrap a disposable SQLite
+    # database. Production schema changes are owned by Alembic and must run
+    # before the web process starts.
+    should_bootstrap_schema = database_url is not None or os.getenv("APP_ENV", "development").casefold() != "production"
+    if should_bootstrap_schema:
+        Base.metadata.create_all(bind=database_engine)
     configured_storage_root = storage_root or os.getenv("STORAGE_ROOT") or PROJECT_ROOT / "storage"
     configured_limit = max_upload_bytes
     if configured_limit is None:
@@ -105,6 +119,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     async def platform_analysis_error_handler(_: Request, exc: PlatformAnalysisError):
         return JSONResponse(status_code=404 if exc.code in {"DATASET_NOT_FOUND", "VERSION_NOT_FOUND"} else 422, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
 
+    @app.exception_handler(ProjectBuildError)
+    async def project_build_error_handler(_: Request, exc: ProjectBuildError):
+        return JSONResponse(status_code=422, content={"error": {"code": "PROJECT_BUILD_FAILED", "message": exc.message, "details": exc.details}})
+
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(_: Request, exc: RequestValidationError):
         return JSONResponse(status_code=422, content={"error": {"code": "REQUEST_INVALID", "message": "Request validation failed.", "details": {"errors": exc.errors()}}})
@@ -131,6 +149,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: str | None = None,
         segment: str | None = None,
         store: str | None = None,
+        template_id: str | None = None,
     ):
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
@@ -139,12 +158,22 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         if version is None:
             raise AppError("VERSION_NOT_FOUND", "Dataset has no current version.", status_code=404, details={"dataset_id": dataset_id})
         try:
+            selected_template = get_dashboard_template(template_id)
+        except DashboardTemplateError as exc:
+            raise AppError(
+                "DASHBOARD_TEMPLATE_NOT_FOUND",
+                "The requested dashboard template does not exist.",
+                status_code=422,
+                details={"template_id": template_id, "available_template_ids": [item["id"] for item in list_dashboard_templates()]},
+            ) from exc
+        try:
             frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
             report = build_bi_report(
                 frame,
                 dataset_name=dataset.name,
                 source_version_id=version.id,
                 filters={"country": country, "product": product, "segment": segment, "store": store},
+                template_id=selected_template["id"],
                 output_dir=request.app.state.storage.root / dataset_id / "reports",
             )
         except Exception as exc:
@@ -157,7 +186,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return dataset, report
 
     def public_bi_report(dataset_id: str, report: dict, *, country: str | None, product: str | None, segment: str | None, store: str | None = None):
-        query = urlencode({key: value for key, value in {"country": country, "product": product, "segment": segment, "store": store}.items() if value})
+        template_id = (report.get("dashboard", {}).get("template", {}) or {}).get("id", DEFAULT_DASHBOARD_TEMPLATE_ID)
+        query = urlencode({key: value for key, value in {
+            "country": country,
+            "product": product,
+            "segment": segment,
+            "store": store,
+            "template_id": template_id,
+        }.items() if value})
         suffix = f"?{query}" if query else ""
         return {
             "report_id": report["report_id"],
@@ -178,6 +214,27 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             },
         }
 
+    @app.get("/api/v1/dashboard-templates")
+    def get_dashboard_templates():
+        """List the presentation templates available for source-backed dashboards."""
+        return {
+            "default_template_id": DEFAULT_DASHBOARD_TEMPLATE_ID,
+            "templates": list_dashboard_templates(),
+        }
+
+    @app.get("/api/v1/project-catalog")
+    def get_project_catalog():
+        """Return the 20 reusable portfolio project specifications."""
+        projects = list_project_specs()
+        return {"count": len(projects), "projects": projects}
+
+    @app.get("/api/v1/project-catalog/{project_id}")
+    def get_project_catalog_item(project_id: str):
+        try:
+            return {"project": next(item for item in list_project_specs() if item["id"] == str(project_id).casefold())}
+        except StopIteration as exc:
+            raise AppError("PROJECT_NOT_FOUND", "The requested portfolio project does not exist.", status_code=404, details={"project_id": project_id}) from exc
+
     def load_dataset_frame(dataset_id: str, request: Request, db: Session, version_id: str | None = None):
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
@@ -191,6 +248,103 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         except pd.errors.EmptyDataError:
             frame = pd.DataFrame()
         return dataset, version, frame
+
+    def public_project_result(result: dict[str, Any], *, project_id: str) -> dict[str, Any]:
+        """Remove binary/HTML payloads while keeping an API-sized build result."""
+        return {
+            "project": result["project"],
+            "status": result["status"],
+            "analytics": result["analytics"],
+            "kpis": result["kpis"],
+            "charts": _remove_artifact_paths(result["charts"]),
+            "tables": result["tables"],
+            "findings": result.get("findings", []),
+            "dashboard": _remove_artifact_paths(result["dashboard"]),
+            "validation": result["validation"],
+            "artifacts": {
+                kind: f"/api/v1/projects/{project_id}/artifacts/{kind}"
+                for kind in ("html", "pdf", "xlsx")
+                if result.get("files", {}).get(kind)
+            },
+        }
+
+    @app.post("/api/v1/projects/{project_id}/build")
+    def build_portfolio_project(
+        project_id: str,
+        payload: dict[str, Any] | None = None,
+        request: Request = None,
+        db: Session = Depends(get_db),
+    ):
+        body = payload or {}
+        try:
+            spec = get_project_spec(project_id)
+        except KeyError as exc:
+            raise AppError("PROJECT_NOT_FOUND", "The requested portfolio project does not exist.", status_code=404, details={"project_id": project_id}) from exc
+        selected_template = body.get("template_id") or spec.template_id
+        dataset_id = body.get("dataset_id")
+        if dataset_id:
+            dataset, version, frame = load_dataset_frame(str(dataset_id), request, db, body.get("version_id"))
+            source_metadata = {"dataset_id": dataset.id, "source_version_id": version.id, "source_name": dataset.name}
+        else:
+            try:
+                rows = max(12, min(int(body.get("rows", 48)), 5000))
+            except (TypeError, ValueError) as exc:
+                raise AppError("PROJECT_ROWS_INVALID", "rows must be an integer between 12 and 5000.", status_code=422) from exc
+            frame = build_project_fixture(spec.id, rows=rows)
+            source_metadata = {"source_name": "synthetic_validation_fixture", "source_version_id": None}
+        result = build_project(
+            frame,
+            project_id=spec.id,
+            template_id=selected_template,
+            output_dir=request.app.state.storage.root / "project_builds" / spec.id,
+        )
+        response = public_project_result(result, project_id=spec.id)
+        response["source"] = source_metadata
+        return response
+
+    @app.post("/api/v1/project-validation/run")
+    def run_project_validation(payload: dict[str, Any] | None = None, request: Request = None):
+        body = payload or {}
+        requested = body.get("project_ids") or [item["id"] for item in list_project_specs()]
+        try:
+            rows = max(12, min(int(body.get("rows", 48)), 5000))
+        except (TypeError, ValueError) as exc:
+            raise AppError("PROJECT_ROWS_INVALID", "rows must be an integer between 12 and 5000.", status_code=422) from exc
+        results, failures = [], []
+        for project_id in requested:
+            try:
+                spec = get_project_spec(str(project_id))
+                result = build_project(
+                    build_project_fixture(spec.id, rows=rows),
+                    project_id=spec.id,
+                    template_id=body.get("template_id") or spec.template_id,
+                    output_dir=request.app.state.storage.root / "project_builds" / spec.id,
+                )
+                results.append(public_project_result(result, project_id=spec.id))
+            except Exception as exc:
+                failures.append({"project_id": str(project_id), "error": str(exc)})
+        return {
+            "status": "COMPLETED" if not failures else "PARTIAL",
+            "count": len(results) + len(failures),
+            "passed": len(results),
+            "failed": len(failures),
+            "projects": results,
+            "failures": failures,
+        }
+
+    @app.get("/api/v1/projects/{project_id}/artifacts/{kind}")
+    def download_project_artifact(project_id: str, kind: str, request: Request):
+        try:
+            spec = get_project_spec(project_id)
+        except KeyError as exc:
+            raise AppError("PROJECT_NOT_FOUND", "The requested portfolio project does not exist.", status_code=404, details={"project_id": project_id}) from exc
+        if kind not in {"html", "pdf", "xlsx"}:
+            raise AppError("ARTIFACT_NOT_FOUND", "Only html, pdf, and xlsx artifacts are available.", status_code=404, details={"kind": kind})
+        path = request.app.state.storage.root / "project_builds" / spec.id / f"report.{kind}"
+        if not path.is_file():
+            raise AppError("ARTIFACT_NOT_FOUND", "Build the project before downloading its artifact.", status_code=404, details={"project_id": spec.id, "kind": kind})
+        media_type = {"html": "text/html", "pdf": "application/pdf", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}[kind]
+        return FileResponse(path, media_type=media_type, filename=f"{spec.id}.{kind}")
 
     def frame_preview(frame: pd.DataFrame, limit: int = 20):
         safe = frame.head(max(0, min(limit, 500))).astype(object).where(pd.notna(frame.head(max(0, min(limit, 500)))), None)
@@ -326,6 +480,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
         _, report = build_dataset_bi_report(
@@ -336,6 +491,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             product=product,
             segment=segment,
             store=store,
+            template_id=template_id,
         )
         return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
 
@@ -348,6 +504,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: str | None,
         segment: str | None,
         store: str | None,
+        template_id: str | None,
     ):
         dataset, report = build_dataset_bi_report(
             dataset_id,
@@ -357,6 +514,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             product=product,
             segment=segment,
             store=store,
+            template_id=template_id,
         )
         path = report["files"].get(kind)
         if not path:
@@ -377,9 +535,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "html", country, product, segment, store)
+        return download_bi_report(dataset_id, request, db, "html", country, product, segment, store, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/pdf")
     def download_bi_report_pdf(
@@ -389,9 +548,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment, store)
+        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment, store, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/xlsx")
     def download_bi_report_xlsx(
@@ -401,9 +561,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment, store)
+        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment, store, template_id)
 
     @app.post("/api/v1/automated-analyst/analyze")
     def analyze_dataset(payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
@@ -414,13 +575,13 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return analyst.run_full_pipeline(dataset_id=dataset_id)
 
     @app.get("/api/v1/reports/{dataset_id}")
-    def get_standard_report(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), db: Session = Depends(get_db)):
-        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store)
+    def get_standard_report(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), template_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store, template_id=template_id)
         return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
 
     @app.get("/api/v1/dashboards/{dataset_id}")
-    def get_standard_dashboard(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), db: Session = Depends(get_db)):
-        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store)
+    def get_standard_dashboard(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), template_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store, template_id=template_id)
         return {"dashboard": _remove_artifact_paths(report["dashboard"]), "kpis": report["kpis"], "charts": _remove_artifact_paths(report["charts"]), "tables": report["tables"], "findings": report.get("findings", []), "source": report["source"]}
 
     @app.get("/api/v1/datasets/{dataset_id}/analysis")

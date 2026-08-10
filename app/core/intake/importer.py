@@ -22,6 +22,29 @@ class DatasetImporter:
     def __init__(self, storage: DatasetStorage):
         self.storage = storage
 
+    @staticmethod
+    def _safe_filename(filename: str | None) -> str:
+        # ``Path.name`` on Linux does not treat a Windows backslash as a separator.
+        raw = (filename or "upload").replace("\\", "/").replace("\x00", "")
+        name = Path(raw).name.strip() or "upload"
+        return name[:512]
+
+    def _copy_upload_with_limit(self, source, destination: Path) -> None:
+        written = 0
+        chunk_size = 1024 * 1024
+        with destination.open("wb") as buffer:
+            while chunk := source.read(chunk_size):
+                written += len(chunk)
+                if written > self.storage.max_upload_bytes:
+                    buffer.close()
+                    destination.unlink(missing_ok=True)
+                    raise AppError(
+                        "FILE_TOO_LARGE",
+                        f"Upload exceeds the configured {self.storage.max_upload_bytes} byte limit.",
+                        status_code=413,
+                    )
+                buffer.write(chunk)
+
     async def inspect(self, upload: UploadFile) -> dict:
         """
         Temporarily save the file, detect its type, and return inspection info.
@@ -29,13 +52,12 @@ class DatasetImporter:
         """
         temp_dir = Path(self.storage.root) / "temp"
         temp_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = Path(upload.filename or "upload").name
+        safe_name = self._safe_filename(upload.filename)
         temp_path = temp_dir / f"{uuid4().hex}_{safe_name}"
 
         try:
             await upload.seek(0)
-            with open(temp_path, "wb") as buffer:
-                shutil.copyfileobj(upload.file, buffer)
+            self._copy_upload_with_limit(upload.file, temp_path)
             
             try:
                 file_type = detect_file_type(temp_path, upload.filename or safe_name)
@@ -56,17 +78,16 @@ class DatasetImporter:
 
     async def import_file(self, db: Session, upload: UploadFile, **kwargs) -> dict:
         dataset_id = str(uuid.uuid4())
-        original_filename = (upload.filename or "upload.csv")[:512]
+        original_filename = self._safe_filename(upload.filename or "upload.csv")
         
         temp_dir = Path(self.storage.root) / "temp"
         temp_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = Path(original_filename).name
+        safe_name = self._safe_filename(original_filename)
         temp_path = temp_dir / f"{uuid4().hex}_{safe_name}"
 
         try:
             await upload.seek(0)
-            with open(temp_path, "wb") as buffer:
-                shutil.copyfileobj(upload.file, buffer)
+            self._copy_upload_with_limit(upload.file, temp_path)
                 
             try:
                 file_type = detect_file_type(temp_path, original_filename)

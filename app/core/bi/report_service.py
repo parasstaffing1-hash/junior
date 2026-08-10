@@ -8,6 +8,11 @@ from uuid import uuid4
 import pandas as pd
 
 from app.core.dashboard.layout import validate_layout
+from app.core.dashboard.templates import (
+    apply_dashboard_template,
+    get_dashboard_template,
+    list_dashboard_templates,
+)
 from app.core.kpi.calculator import calculate_kpi
 from app.core.reporting.pdf_generator import build_pdf_bytes
 from app.core.reporting.report_builder import assemble_report, render_html
@@ -109,6 +114,7 @@ def build_bi_report(
     dataset_name: str,
     source_version_id: str | None = None,
     filters: dict[str, str | None] | None = None,
+    template_id: str | None = None,
     output_dir: str | Path | None = None,
     findings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -116,6 +122,7 @@ def build_bi_report(
     if not isinstance(df, pd.DataFrame):
         raise ValueError("BI report input must be a pandas DataFrame.")
 
+    dashboard_template = get_dashboard_template(template_id)
     report_id = str(uuid4())
     output_path = Path(output_dir).expanduser().resolve() / report_id if output_dir else None
     work = df.copy(deep=True)
@@ -335,6 +342,7 @@ def build_bi_report(
             [location_key, "sales"],
         )
         content["source_ref"] = "table:top_countries" if country_column else "table:top_stores"
+        content["title"] = "Top countries by sales" if country_column else "Top stores by sales"
         tables.append(content)
         table_by_ref[content["source_ref"]] = content
     if profit_column and product_column:
@@ -344,6 +352,7 @@ def build_bi_report(
             ["product", "profit"],
         )
         content["source_ref"] = "table:top_products"
+        content["title"] = "Top products by profit"
         tables.append(content)
         table_by_ref["table:top_products"] = content
 
@@ -437,7 +446,12 @@ def build_bi_report(
         "subtitle": "Business performance overview",
         "description": f"Source-backed BI report generated from {dataset_name}.",
         "revision": 1,
-        "parameters": {"source_version_id": source_version_id or "", "generated_at": _utc_now().isoformat(), **applied_filters},
+        "parameters": {
+            "source_version_id": source_version_id or "",
+            "generated_at": _utc_now().isoformat(),
+            "dashboard_template_id": dashboard_template["id"],
+            **applied_filters,
+        },
     }
     content_by_ref = {**kpi_by_ref, **chart_by_ref, **table_by_ref}
     manifest = assemble_report(report, report_sections, content_by_ref=content_by_ref, parameters=report["parameters"], missing_content_policy="error")
@@ -467,6 +481,19 @@ def build_bi_report(
             "w": 6,
             "h": 4,
         })
+    for index, table in enumerate(tables):
+        widgets.append({
+            "id": table["source_ref"],
+            "widget_type": "table",
+            "title": table.get("title") or "Detail table",
+            "source_ref": table["source_ref"],
+            "config": {"table": table},
+            "x": 0,
+            "y": 4 + len(charts) * 5 + index * 5,
+            "w": 12,
+            "h": 5,
+        })
+    widgets = apply_dashboard_template(dashboard_template, widgets)
     layout_validation = validate_layout(widgets)
     if not layout_validation["valid"]:
         raise ValueError(f"Generated BI dashboard layout is invalid: {layout_validation['collisions']}")
@@ -483,6 +510,8 @@ def build_bi_report(
         "id": f"dashboard:{report_id}",
         "title": report["title"],
         "description": report["description"],
+        "template": dashboard_template,
+        "available_templates": list_dashboard_templates(),
         "source": source,
         "filters": dashboard_filters,
         "widgets": widgets,
