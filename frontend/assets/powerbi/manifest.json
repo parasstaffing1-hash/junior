@@ -1,0 +1,27 @@
+{
+  "repository": "Dashboard-Design/Power-BI-Design-Files",
+  "repository_url": "https://github.com/Dashboard-Design/Power-BI-Design-Files",
+  "license": "MIT",
+  "assets": [
+    {
+      "local_path": "frontend/assets/powerbi/ecommerce_background.svg",
+      "source_path": "Full Dashboards/Ecommerce Conversion Dashboard/Images/Background.svg",
+      "source_sha": "2aa8cda50c542870ed427264625418c09edf50cd"
+    },
+    {
+      "local_path": "frontend/assets/powerbi/bibb_free_default.json",
+      "source_path": "Theme .JSON Files/BIBB - Free Default.json",
+      "source_sha": "9f6331034e7d0d1f8242894fa414dc2865d31c08"
+    },
+    {
+      "local_path": "frontend/assets/powerbi/teals.json",
+      "source_path": "Theme .JSON Files/kerrykolosko - Teals.json",
+      "source_sha": "97184407089b1d98c93ffea335643cbcc3a0279e"
+    },
+    {
+      "local_path": "frontend/assets/powerbi/executive_sales_reference.css",
+      "source_path": "Full Dashboards/Exceutive Sales Report/style.css",
+      "source_sha": "09875c7d29a25134292dfee1662673b23a3cd410"
+    }
+  ]
+}

@@ -133,6 +133,22 @@
                         <p class="empty-text">No datasets yet. Upload your first dataset above.</p>
                     </div>
                 </section>
+
+                <!-- Portfolio project workbench -->
+                <section class="project-lab card" id="project-lab">
+                    <div class="project-lab-header">
+                        <div>
+                            <span class="dashboard-control-label">Portfolio project workbench</span>
+                            <h3>Build the 20 reference analytics projects</h3>
+                            <p>Use deterministic validation fixtures or switch to an uploaded dataset through the API. Every build uses a selectable BI dashboard template and produces HTML, PDF, Excel, Power BI PBIP, and Tableau TWBX/TWB artifacts.</p>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="project-build-all" onclick="App.buildAllPortfolioProjects()"><i class="fa-solid fa-list-check"></i> Validate all 20</button>
+                    </div>
+                    <div class="project-catalog-grid" id="project-catalog-grid">
+                        <p class="empty-text">Loading portfolio projects...</p>
+                    </div>
+                    <div id="project-validation-results" aria-live="polite"></div>
+                </section>
             </main>
         </div>
 
@@ -267,8 +283,25 @@
                             </div>
                             <div class="bi-report-downloads" id="bi-report-downloads"></div>
                         </div>
+                        <section class="dashboard-design-studio hidden" id="dashboard-design-studio" aria-label="Dashboard design controls">
+                            <div class="dashboard-design-summary">
+                                <div class="dashboard-template-icon" id="dashboard-template-icon"><i class="fa-solid fa-chart-line"></i></div>
+                                <div>
+                                    <span class="dashboard-control-label">Dashboard design</span>
+                                    <strong id="dashboard-template-name">Executive overview</strong>
+                                    <p id="dashboard-template-description">A focused operating pulse for fast decisions.</p>
+                                </div>
+                                <button type="button" class="btn btn-template" onclick="App.toggleDashboardTemplates()" aria-expanded="false" aria-controls="dashboard-template-gallery" id="dashboard-template-toggle">
+                                    <i class="fa-solid fa-swatchbook"></i> Templates
+                                </button>
+                            </div>
+                            <div class="dashboard-template-gallery hidden" id="dashboard-template-gallery" role="region" aria-label="Available dashboard templates">
+                                <div class="dashboard-template-list" id="dashboard-template-list"></div>
+                            </div>
+                        </section>
+                        <div class="dashboard-filter-bar hidden" id="dashboard-filter-bar" aria-label="Dashboard filters"></div>
                         <div class="bi-dashboard-grid" id="bi-dashboard-container">
-                            <!-- KPIs and Charts will be injected here via app.js -->
+                            <!-- Template-positioned KPIs, charts, and tables are injected via app.js -->
                         </div>
                         <section class="bi-findings-section" id="bi-report-findings-section">
                             <h3>Key findings</h3>

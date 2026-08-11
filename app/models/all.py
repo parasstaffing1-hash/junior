@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON, Float, Boolean, Text
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON, Float, Boolean, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -31,6 +31,7 @@ class Dataset(Base):
 
 class DatasetVersion(Base):
     __tablename__ = "dataset_versions"
+    __table_args__ = (UniqueConstraint("dataset_id", "version_number", name="uq_dataset_versions_dataset_version"),)
     
     id = Column(String, primary_key=True, default=generate_uuid)
     dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False)
@@ -132,4 +133,3 @@ class ReportDefinition(Base):
     definition_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-

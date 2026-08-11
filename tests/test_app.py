@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
+import json
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
+
 
 def _import_dataset(client, csv_file):
     response = client.post("/api/v1/datasets/import", files=csv_file)
@@ -102,12 +107,32 @@ def test_bi_report_dashboard_filters_and_exports(client):
         ("html", "text/html", b"<!doctype html>"),
         ("pdf", "application/pdf", b"%PDF"),
         ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", b"PK"),
+        ("powerbi", "application/zip", b"PK"),
+        ("tableau", "application/zip", b"PK"),
+        ("tableau_twb", "application/xml", b"<?xml"),
     ):
         exported = client.get(f"/api/v1/datasets/{dataset_id}/bi_report/{file_format}")
         assert exported.status_code == 200, exported.text
         assert exported.headers["content-type"].startswith(content_type)
         assert exported.content.startswith(signature)
         assert len(exported.content) > 100
+
+    with ZipFile(BytesIO(client.get(f"/api/v1/datasets/{dataset_id}/bi_report/powerbi").content)) as powerbi:
+        names = set(powerbi.namelist())
+        project_file = next(name for name in names if name.endswith(".pbip"))
+        project = json.loads(powerbi.read(project_file))
+        report_folder = project["artifacts"][0]["report"]["path"]
+        assert f"{report_folder}/definition.pbir" in names
+        assert any(name.endswith(".SemanticModel/definition.pbism") for name in names)
+        assert any(name.endswith(".SemanticModel/model.bim") for name in names)
+        assert "data/data.csv" in names
+        assert json.loads(powerbi.read(f"{report_folder}/definition.pbir"))["datasetReference"]["byPath"]["path"].startswith("../")
+
+    tableau_package = client.get(f"/api/v1/datasets/{dataset_id}/bi_report/tableau")
+    with ZipFile(BytesIO(tableau_package.content)) as tableau:
+        assert "report.twb" in tableau.namelist()
+        assert "data.csv" in tableau.namelist()
+        ET.fromstring(tableau.read("report.twb"))
 
     filtered = client.get(f"/api/v1/datasets/{dataset_id}/bi_report?country=Canada")
     assert filtered.status_code == 200

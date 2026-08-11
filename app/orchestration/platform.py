@@ -320,7 +320,19 @@ def run_full_platform_analysis(db: Session, storage: DatasetStorage, dataset_id:
         "eda": eda,
         "findings": findings,
         "chart_recommendations": recommendations,
-        "report": {key: value for key, value in report.items() if key not in {"manifest", "html", "pdf_bytes", "xlsx_bytes"}},
+        "report": {
+            key: value
+            for key, value in report.items()
+            if key not in {
+                "manifest",
+                "html",
+                "pdf_bytes",
+                "xlsx_bytes",
+                "powerbi_bytes",
+                "tableau_twbx_bytes",
+                "tableau_twb_bytes",
+            }
+        },
         "lineage": lineage,
         "artifacts": artifacts,
     })

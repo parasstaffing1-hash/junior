@@ -1,0 +1,49 @@
+date,region,category,sales,profit,quantity
+2025-01-01,North,Technology,588.13,110.38,8
+2025-01-02,South,Furniture,2255.72,77.79,7
+2025-01-03,East,Office Supplies,639.32,-47.3,1
+2025-01-04,West,Technology,3769.98,667.43,4
+2025-01-05,North,Furniture,2366.12,27.38,2
+2025-01-06,South,Office Supplies,4176.55,439.12,11
+2025-01-07,East,Technology,1818.22,104.42,1
+2025-01-08,West,Furniture,2284.87,-20.9,1
+2025-01-09,North,Office Supplies,770.45,3.16,2
+2025-01-10,South,Technology,3636.07,257.42,11
+2025-01-11,East,Furniture,3548.31,805.43,2
+2025-01-12,West,Office Supplies,2553.11,-95.01,6
+2025-01-13,North,Technology,702.58,29.45,5
+2025-01-14,South,Furniture,897.14,-8.17,2
+2025-01-15,East,Office Supplies,3296.16,306.44,7
+2025-01-16,West,Technology,456.14,81.42,11
+2025-01-17,North,Furniture,1937.39,314.06,6
+2025-01-18,South,Office Supplies,1744.76,341.49,4
+2025-01-19,East,Technology,857.51,66.71,3
+2025-01-20,West,Furniture,755.4,137.8,2
+2025-01-21,North,Office Supplies,3702.72,426.02,3
+2025-01-22,South,Technology,1745.44,392.26,10
+2025-01-23,East,Furniture,3028.79,644.66,7
+2025-01-24,West,Office Supplies,2227.05,94.16,5
+2025-01-25,North,Technology,3715.73,720.6,11
+2025-01-26,South,Furniture,1343.07,246.97,6
+2025-01-27,East,Office Supplies,4062.93,808.19,3
+2025-01-28,West,Technology,3337.95,-91.95,8
+2025-01-29,North,Furniture,278.02,0.23,8
+2025-01-30,South,Office Supplies,2863.56,637.02,9
+2025-01-31,East,Technology,853.22,144.85,11
+2025-02-01,West,Furniture,344.83,71.98,2
+2025-02-02,North,Office Supplies,3762.67,896.19,5
+2025-02-03,South,Technology,4045.14,584.61,11
+2025-02-04,East,Furniture,3680.51,795.51,9
+2025-02-05,West,Office Supplies,3824.72,780.97,3
+2025-02-06,North,Technology,3541.99,699.64,11
+2025-02-07,South,Furniture,2595.12,-114.58,1
+2025-02-08,East,Office Supplies,1093.13,191.51,10
+2025-02-09,West,Technology,3505.82,-236.17,1
+2025-02-10,North,Furniture,838.02,116.56,5
+2025-02-11,South,Office Supplies,2553.67,364.18,10
+2025-02-12,East,Technology,2784.84,344.39,11
+2025-02-13,West,Furniture,1154.39,38.41,9
+2025-02-14,North,Office Supplies,433.02,29.32,1
+2025-02-15,South,Technology,266.11,30.57,11
+2025-02-16,East,Furniture,2771.1,-135.8,4
+2025-02-17,West,Office Supplies,877.03,186.33,1

@@ -1,0 +1,49 @@
+customer_id,tenure,monthly_charges,support_tickets,contract,churned
+C0001,30,97.12,5,Monthly,0
+C0002,46,155.15,11,Annual,0
+C0003,73,111.75,9,Two year,1
+C0004,29,121.58,0,Monthly,0
+C0005,33,89.48,10,Annual,0
+C0006,62,90.97,6,Two year,0
+C0007,74,97.51,5,Monthly,0
+C0008,40,37.19,7,Annual,0
+C0009,24,174.86,11,Two year,1
+C0010,5,165.74,8,Monthly,1
+C0011,68,172.67,4,Annual,0
+C0012,36,99.96,7,Two year,0
+C0013,30,49.78,10,Monthly,0
+C0014,74,171.63,6,Annual,0
+C0015,56,146.02,4,Two year,0
+C0016,32,139.39,8,Monthly,0
+C0017,25,192.98,4,Annual,0
+C0018,14,165.51,1,Two year,0
+C0019,50,77.57,4,Monthly,0
+C0020,22,143.98,9,Annual,0
+C0021,44,148.02,10,Two year,0
+C0022,61,193.1,8,Monthly,0
+C0023,29,208.66,3,Annual,0
+C0024,69,52.17,6,Two year,0
+C0025,17,107.94,9,Monthly,1
+C0026,32,123.37,6,Annual,0
+C0027,22,51.7,2,Two year,0
+C0028,11,168.05,0,Monthly,0
+C0029,61,151.84,4,Annual,0
+C0030,37,143.99,2,Two year,1
+C0031,32,192.67,3,Monthly,0
+C0032,48,98.05,5,Annual,0
+C0033,18,159.61,5,Two year,0
+C0034,28,153.31,2,Monthly,0
+C0035,37,100.29,3,Annual,0
+C0036,60,103.52,6,Two year,0
+C0037,40,149.52,11,Monthly,0
+C0038,1,170.84,6,Annual,1
+C0039,7,30.44,0,Two year,1
+C0040,11,114.13,1,Monthly,0
+C0041,30,162.26,3,Annual,0
+C0042,50,37.2,6,Two year,0
+C0043,30,26.64,4,Monthly,0
+C0044,48,25.61,11,Annual,0
+C0045,54,204.9,0,Two year,0
+C0046,25,185.08,5,Monthly,0
+C0047,46,39.51,2,Annual,0
+C0048,1,143.91,7,Two year,1

@@ -36,6 +36,8 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | KPI calculation | `POST /api/v1/datasets/{dataset_id}/kpis/calculate` |
 | BI dashboard/report | `GET /api/v1/datasets/{dataset_id}/bi_report` |
 | HTML/PDF/Excel exports | `GET /api/v1/datasets/{dataset_id}/bi_report/html`, `/pdf`, and `/xlsx` |
+| Power BI project export | `GET /api/v1/datasets/{dataset_id}/bi_report/powerbi` returns a `.pbip.zip`; extract it and open the `.pbip` shortcut in Power BI Desktop with PBIP preview enabled |
+| Tableau workbook export | `GET /api/v1/datasets/{dataset_id}/bi_report/tableau` returns `.twbx`; `/tableau_twb` returns the editable `.twb` XML workbook |
 | Versions / lineage / latest analysis | `GET /api/v1/datasets/{dataset_id}/versions`, `/lineage`, and `/analysis` |
 | Allowlisted automation | `GET /api/v1/automation/actions` and `POST /api/v1/automation/plan` |
 
