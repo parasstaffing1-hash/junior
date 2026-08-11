@@ -24,8 +24,36 @@ const App = {
             // Template selection is an enhancement; the dashboard still works when storage is unavailable.
         }
         this.setupDragAndDrop();
+        this.loadAcquisitionReadiness();
         this.loadRecentDatasets();
         this.loadProjectCatalog();
+    },
+
+    async loadAcquisitionReadiness() {
+        const cockpit = document.getElementById('acquisition-cockpit');
+        if (!cockpit) return;
+        try {
+            const response = await fetch('/api/v1/platform/acquisition-readiness');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error?.message || 'Readiness evidence unavailable');
+            const score = Number(data.score || 0);
+            document.getElementById('readiness-score').innerHTML = `<strong>${score}</strong><span>/ 100</span>`;
+            const status = document.getElementById('readiness-status');
+            status.className = `readiness-status ${data.acquisition_ready ? 'ready' : 'investment-required'}`;
+            status.innerHTML = `<i class="fa-solid ${data.acquisition_ready ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i><strong>${this.escapeHtml(String(data.grade || '').replace(/_/g, ' '))}</strong><span>${this.escapeHtml(data.method || '')}</span>`;
+            document.getElementById('readiness-domains').innerHTML = (data.domains || []).map(domain => `
+                <div class="readiness-domain">
+                    <div><span>${this.escapeHtml(String(domain.domain || '').replace(/_/g, ' '))}</span><strong>${Number(domain.score || 0)}%</strong></div>
+                    <div class="readiness-meter"><span style="width:${Math.max(0, Math.min(100, Number(domain.score || 0)))}%"></span></div>
+                </div>
+            `).join('');
+            const blockers = data.critical_blockers || [];
+            document.getElementById('readiness-blockers').innerHTML = blockers.length
+                ? `<div class="readiness-blocker-title"><span>Critical investment gates</span><strong>${blockers.length} open</strong></div><div class="readiness-blocker-list">${blockers.slice(0, 6).map(item => `<span>${this.escapeHtml(item.name)}</span>`).join('')}</div>`
+                : '<div class="readiness-blocker-title"><span>No critical capability blockers</span><strong>Gate clear</strong></div>';
+        } catch (error) {
+            document.getElementById('readiness-status').textContent = error.message || 'Readiness evidence unavailable';
+        }
     },
 
     navigate(viewName) {

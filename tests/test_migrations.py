@@ -38,6 +38,7 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         "audit_events",
         "report_definitions",
         "automation_runs",
+        "workspace_assets",
     }
     assert any(
         set(constraint["column_names"]) == {"dataset_id", "version_number"}

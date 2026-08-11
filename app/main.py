@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
@@ -26,13 +27,22 @@ from app.core.dashboard.templates import (
 )
 from app.core.eda.findings import detect_findings
 from app.core.eda.report import generate_eda_report
+from app.core.enterprise.readiness import capability_catalog, readiness_summary
+from app.core.enterprise.workspace import (
+    ASSET_STATUSES,
+    ASSET_TYPES,
+    WorkspaceValidationError,
+    validate_asset_definition,
+    validate_workspace_assets,
+)
 from app.core.kpi.calculator import calculate_kpi
 from app.orchestration.quality_pipeline import QualityPipeline
 from app.core.statistics.report import generate_statistics_report
+from app.core.sql.workbench import SQLWorkbenchError, execute_dataset_sql, validate_read_only_sql
 from app.core.transformation.pipeline import execute_pipeline
 from app.core.visualization.recommender import recommend_charts
 from app.errors import AppError
-from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun
+from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset
 from app.orchestration.automated_analyst import AutomatedAnalyst
 from app.orchestration.platform import (
     PlatformAnalysisError,
@@ -122,6 +132,15 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.exception_handler(ProjectBuildError)
     async def project_build_error_handler(_: Request, exc: ProjectBuildError):
         return JSONResponse(status_code=422, content={"error": {"code": "PROJECT_BUILD_FAILED", "message": exc.message, "details": exc.details}})
+
+    @app.exception_handler(WorkspaceValidationError)
+    async def workspace_validation_error_handler(_: Request, exc: WorkspaceValidationError):
+        return JSONResponse(status_code=422, content={"error": {"code": "WORKSPACE_ASSET_INVALID", "message": exc.message, "details": exc.details}})
+
+    @app.exception_handler(SQLWorkbenchError)
+    async def sql_workbench_error_handler(_: Request, exc: SQLWorkbenchError):
+        status_code = 408 if exc.code == "SQL_TIMEOUT" else 422
+        return JSONResponse(status_code=status_code, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(_: Request, exc: RequestValidationError):
@@ -251,6 +270,235 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         except pd.errors.EmptyDataError:
             frame = pd.DataFrame()
         return dataset, version, frame
+
+    def public_workspace_asset(asset: WorkspaceAsset) -> dict[str, Any]:
+        return {
+            "id": asset.id,
+            "workspace_id": asset.workspace_id,
+            "asset_type": asset.asset_type,
+            "name": asset.name,
+            "description": asset.description,
+            "dataset_id": asset.dataset_id,
+            "definition": asset.definition_json,
+            "status": asset.status,
+            "owner": asset.owner,
+            "tags": asset.tags or [],
+            "version": asset.version,
+            "created_at": asset.created_at,
+            "updated_at": asset.updated_at,
+        }
+
+    def get_workspace_asset_or_404(workspace_id: str, asset_id: str, db: Session) -> WorkspaceAsset:
+        asset = db.query(WorkspaceAsset).filter(
+            WorkspaceAsset.workspace_id == workspace_id,
+            WorkspaceAsset.id == asset_id,
+        ).first()
+        if asset is None:
+            raise AppError(
+                "WORKSPACE_ASSET_NOT_FOUND",
+                "The requested workspace asset was not found.",
+                status_code=404,
+                details={"workspace_id": workspace_id, "asset_id": asset_id},
+            )
+        return asset
+
+    def validate_workspace_asset_payload(payload: dict[str, Any], *, existing: WorkspaceAsset | None = None) -> dict[str, Any]:
+        asset_type = str(payload.get("asset_type", existing.asset_type if existing else "")).strip().casefold()
+        name = str(payload.get("name", existing.name if existing else "")).strip()
+        status = str(payload.get("status", existing.status if existing else "draft")).strip().casefold()
+        definition = payload.get("definition", existing.definition_json if existing else None)
+        if not name:
+            raise WorkspaceValidationError("Asset name is required.")
+        if asset_type not in ASSET_TYPES:
+            raise WorkspaceValidationError("Unsupported workspace asset type.", {"asset_type": asset_type, "allowed": sorted(ASSET_TYPES)})
+        if status not in ASSET_STATUSES:
+            raise WorkspaceValidationError("Unsupported workspace asset status.", {"status": status, "allowed": sorted(ASSET_STATUSES)})
+        validate_asset_definition(asset_type, definition)
+        tags = payload.get("tags", existing.tags if existing else [])
+        if tags is None:
+            tags = []
+        if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+            raise WorkspaceValidationError("tags must be a list of non-empty strings.")
+        return {
+            "asset_type": asset_type,
+            "name": name,
+            "status": status,
+            "definition": definition,
+            "tags": list(dict.fromkeys(tag.strip() for tag in tags)),
+        }
+
+    @app.get("/api/v1/platform/capabilities")
+    def platform_capabilities():
+        capabilities = capability_catalog()
+        return {"count": len(capabilities), "capabilities": capabilities}
+
+    @app.get("/api/v1/platform/acquisition-readiness")
+    def platform_acquisition_readiness():
+        return readiness_summary()
+
+    @app.post("/api/v1/sql/validate")
+    def validate_sql(payload: dict[str, Any] | None = None):
+        return validate_read_only_sql((payload or {}).get("sql"))
+
+    @app.post("/api/v1/datasets/{dataset_id}/sql/query")
+    def query_dataset_with_sql(
+        dataset_id: str,
+        payload: dict[str, Any] | None = None,
+        request: Request = None,
+        db: Session = Depends(get_db),
+    ):
+        body = payload or {}
+        dataset, version, frame = load_dataset_frame(dataset_id, request, db, body.get("version_id"))
+        try:
+            max_rows = int(body.get("max_rows", 500))
+            timeout_seconds = float(body.get("timeout_seconds", 5.0))
+        except (TypeError, ValueError) as exc:
+            raise SQLWorkbenchError("SQL_OPTIONS_INVALID", "max_rows and timeout_seconds must be numeric.") from exc
+        result = execute_dataset_sql(
+            frame,
+            body.get("sql"),
+            max_rows=max_rows,
+            timeout_seconds=timeout_seconds,
+        )
+        return {
+            "dataset_id": dataset.id,
+            "dataset_name": dataset.name,
+            "source_version_id": version.id,
+            **result,
+        }
+
+    @app.get("/api/v1/workspaces/{workspace_id}/assets")
+    def list_workspace_assets(
+        workspace_id: str,
+        asset_type: Optional[str] = Query(None),
+        status: Optional[str] = Query(None),
+        db: Session = Depends(get_db),
+    ):
+        query = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id)
+        if asset_type:
+            query = query.filter(WorkspaceAsset.asset_type == asset_type.casefold())
+        if status:
+            query = query.filter(WorkspaceAsset.status == status.casefold())
+        assets = query.order_by(WorkspaceAsset.asset_type.asc(), WorkspaceAsset.name.asc()).all()
+        return {"workspace_id": workspace_id, "count": len(assets), "assets": [public_workspace_asset(asset) for asset in assets]}
+
+    @app.post("/api/v1/workspaces/{workspace_id}/assets", status_code=201)
+    def create_workspace_asset(workspace_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
+        normalized = validate_workspace_asset_payload(payload)
+        if normalized["status"] == "published":
+            raise WorkspaceValidationError("Use the publish endpoint to publish a governed asset.")
+        dataset_id = payload.get("dataset_id")
+        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id)).first() is None:
+            raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
+        asset = WorkspaceAsset(
+            workspace_id=workspace_id,
+            asset_type=normalized["asset_type"],
+            name=normalized["name"],
+            description=payload.get("description"),
+            dataset_id=str(dataset_id) if dataset_id else None,
+            definition_json=normalized["definition"],
+            status=normalized["status"],
+            owner=payload.get("owner"),
+            tags=normalized["tags"],
+        )
+        db.add(asset)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise AppError(
+                "WORKSPACE_ASSET_CONFLICT",
+                "An asset with this name and type already exists in the workspace.",
+                status_code=409,
+                details={"workspace_id": workspace_id, "asset_type": normalized["asset_type"], "name": normalized["name"]},
+            ) from exc
+        db.refresh(asset)
+        return public_workspace_asset(asset)
+
+    @app.get("/api/v1/workspaces/{workspace_id}/assets/{asset_id}")
+    def get_workspace_asset(workspace_id: str, asset_id: str, db: Session = Depends(get_db)):
+        return public_workspace_asset(get_workspace_asset_or_404(workspace_id, asset_id, db))
+
+    @app.put("/api/v1/workspaces/{workspace_id}/assets/{asset_id}")
+    def update_workspace_asset(workspace_id: str, asset_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
+        asset = get_workspace_asset_or_404(workspace_id, asset_id, db)
+        normalized = validate_workspace_asset_payload(payload, existing=asset)
+        if normalized["status"] == "published" and asset.status != "published":
+            raise WorkspaceValidationError("Use the publish endpoint to publish a governed asset.")
+        dataset_id = payload.get("dataset_id", asset.dataset_id)
+        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id)).first() is None:
+            raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
+        governed_content_changed = any((
+            normalized["asset_type"] != asset.asset_type,
+            normalized["name"] != asset.name,
+            (str(dataset_id) if dataset_id else None) != asset.dataset_id,
+            normalized["definition"] != asset.definition_json,
+        ))
+        asset.asset_type = normalized["asset_type"]
+        asset.name = normalized["name"]
+        asset.description = payload.get("description", asset.description)
+        asset.dataset_id = str(dataset_id) if dataset_id else None
+        asset.definition_json = normalized["definition"]
+        asset.status = "draft" if asset.status == "published" and governed_content_changed else normalized["status"]
+        asset.owner = payload.get("owner", asset.owner)
+        asset.tags = normalized["tags"]
+        asset.version += 1
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise AppError("WORKSPACE_ASSET_CONFLICT", "An asset with this name and type already exists in the workspace.", status_code=409) from exc
+        db.refresh(asset)
+        return public_workspace_asset(asset)
+
+    @app.post("/api/v1/workspaces/{workspace_id}/assets/{asset_id}/publish")
+    def publish_workspace_asset(workspace_id: str, asset_id: str, db: Session = Depends(get_db)):
+        asset = get_workspace_asset_or_404(workspace_id, asset_id, db)
+        validate_asset_definition(asset.asset_type, asset.definition_json)
+        workspace_assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).all()
+        validation = validate_workspace_assets(workspace_assets)
+        target_errors = [item for item in validation["unresolved_dependencies"] if item["asset_id"] == asset.id]
+        if target_errors:
+            raise WorkspaceValidationError("The asset has unresolved dependencies and cannot be published.", {"unresolved_dependencies": target_errors})
+        asset_by_id = {item.id: item for item in workspace_assets}
+        unpublished_dependencies = [
+            {"asset_id": dependency.id, "name": dependency.name, "status": dependency.status}
+            for dependency_id in (asset.definition_json or {}).get("depends_on", [])
+            if (dependency := asset_by_id.get(dependency_id)) is not None and dependency.status != "published"
+        ]
+        if unpublished_dependencies:
+            raise WorkspaceValidationError(
+                "All dependencies must be published before this asset can be published.",
+                {"unpublished_dependencies": unpublished_dependencies},
+            )
+        asset.status = "published"
+        asset.version += 1
+        db.commit()
+        db.refresh(asset)
+        return {"asset": public_workspace_asset(asset), "validation": validation}
+
+    @app.get("/api/v1/workspaces/{workspace_id}/lineage")
+    def get_workspace_lineage(workspace_id: str, db: Session = Depends(get_db)):
+        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).order_by(WorkspaceAsset.created_at.asc()).all()
+        nodes = [
+            {"id": asset.id, "kind": "asset", "asset_type": asset.asset_type, "name": asset.name, "status": asset.status}
+            for asset in assets
+        ]
+        dataset_ids = sorted({asset.dataset_id for asset in assets if asset.dataset_id})
+        datasets = db.query(Dataset).filter(Dataset.id.in_(dataset_ids)).all() if dataset_ids else []
+        nodes.extend({"id": item.id, "kind": "dataset", "name": item.name} for item in datasets)
+        edges = []
+        for asset in assets:
+            if asset.dataset_id:
+                edges.append({"source": asset.dataset_id, "target": asset.id, "relationship": "source_dataset"})
+            for dependency in (asset.definition_json or {}).get("depends_on", []):
+                edges.append({"source": dependency, "target": asset.id, "relationship": "depends_on"})
+        return {"workspace_id": workspace_id, "nodes": nodes, "edges": edges, "validation": validate_workspace_assets(assets)}
+
+    @app.post("/api/v1/workspaces/{workspace_id}/validate")
+    def validate_workspace(workspace_id: str, db: Session = Depends(get_db)):
+        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).all()
+        return {"workspace_id": workspace_id, **validate_workspace_assets(assets)}
 
     def public_project_result(result: dict[str, Any], *, project_id: str) -> dict[str, Any]:
         """Remove binary/HTML payloads while keeping an API-sized build result."""

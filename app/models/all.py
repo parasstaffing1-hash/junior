@@ -133,3 +133,26 @@ class ReportDefinition(Base):
     definition_json = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class WorkspaceAsset(Base):
+    """Governed definition for reusable analyst and BI developer assets."""
+
+    __tablename__ = "workspace_assets"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "asset_type", "name", name="uq_workspace_asset_name"),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    workspace_id = Column(String, nullable=False, default="default", index=True)
+    asset_type = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    dataset_id = Column(String, ForeignKey("datasets.id"), nullable=True)
+    definition_json = Column("definition", JSON, nullable=False)
+    status = Column(String, nullable=False, default="draft", index=True)
+    owner = Column(String, nullable=True)
+    tags = Column(JSON, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

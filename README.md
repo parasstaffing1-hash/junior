@@ -2,6 +2,8 @@
 
 This project provides a local Automated Data Analyst / BI Platform v1.0. A business user can upload messy tabular data, inspect quality, preview and apply cleaning or transformation recipes, run statistics and EDA, generate deterministic findings, build KPIs/charts/dashboards, and export management reports while preserving dataset versions, artifacts, and lineage.
 
+The enterprise product direction, capability gaps, acquisition gates, and Tools 101–240 roadmap are documented in [BILLION_DOLLAR_PLATFORM_BLUEPRINT.md](docs/BILLION_DOLLAR_PLATFORM_BLUEPRINT.md). The platform reports its current readiness from evidence and does not claim that planned capabilities already exist.
+
 ## Run locally
 
 From this directory in PowerShell:
@@ -22,6 +24,7 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | --- | --- |
 | Health check | `GET /health` |
 | Readiness check | `GET /health/ready` |
+| Capability catalog / acquisition readiness | `GET /api/v1/platform/capabilities` and `/api/v1/platform/acquisition-readiness` |
 | Inspect an upload | `POST /api/v1/datasets/import/inspect` |
 | Import a dataset | `POST /api/v1/datasets/import` |
 | List datasets | `GET /api/v1/datasets` |
@@ -34,11 +37,13 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Statistics / EDA / findings | `POST /api/v1/datasets/{dataset_id}/statistics/summary`, `/eda/report`, and `/findings` |
 | Chart recommendations | `POST /api/v1/datasets/{dataset_id}/visualization/recommend` |
 | KPI calculation | `POST /api/v1/datasets/{dataset_id}/kpis/calculate` |
+| Validate / run read-only SQL | `POST /api/v1/sql/validate` and `POST /api/v1/datasets/{dataset_id}/sql/query` (query table: `dataset`) |
 | BI dashboard/report | `GET /api/v1/datasets/{dataset_id}/bi_report` |
 | HTML/PDF/Excel exports | `GET /api/v1/datasets/{dataset_id}/bi_report/html`, `/pdf`, and `/xlsx` |
 | Power BI project export | `GET /api/v1/datasets/{dataset_id}/bi_report/powerbi` returns a `.pbip.zip`; extract it and open the `.pbip` shortcut in Power BI Desktop with PBIP preview enabled |
 | Tableau workbook export | `GET /api/v1/datasets/{dataset_id}/bi_report/tableau` returns `.twbx`; `/tableau_twb` returns the editable `.twb` XML workbook |
 | Versions / lineage / latest analysis | `GET /api/v1/datasets/{dataset_id}/versions`, `/lineage`, and `/analysis` |
+| Governed workspace assets | `GET/POST /api/v1/workspaces/{workspace_id}/assets`, `PUT /assets/{asset_id}`, `/publish`, `/lineage`, and `/validate` |
 | Allowlisted automation | `GET /api/v1/automation/actions` and `POST /api/v1/automation/plan` |
 
 Example upload:

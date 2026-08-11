@@ -16,6 +16,7 @@ def test_health_and_readiness(client):
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert "Automated Data Analyst" in dashboard.text
+    assert "Acquisition readiness" in dashboard.text
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/health/live").json() == {"status": "ok"}
     assert client.get("/health/ready").json() == {"status": "ready"}
