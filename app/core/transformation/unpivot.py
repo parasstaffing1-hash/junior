@@ -85,31 +85,42 @@ def unpivot_dataframe(
 
     source = df.copy(deep=True)
     marker = "__tool29_source_row__"
-    if marker in source.columns:
-        raise UnpivotError("RESERVED_COLUMN_COLLISION", "Dataset contains reserved internal column.", {"column": marker})
+    internal_variable = "__tool29_variable__"
+    internal_value = "__tool29_value__"
+    value_order = "__tool29_value_order__"
+    reserved = [marker, internal_variable, internal_value, value_order]
+    collisions = [column for column in reserved if column in source.columns]
+    if collisions:
+        raise UnpivotError("RESERVED_COLUMN_COLLISION", "Dataset contains reserved internal columns.", {"columns": collisions})
     source[marker] = range(len(source))
 
+    # Always melt through internal output names. pandas rejects value_name when
+    # an input measure has the same name (for example, unpivoting a column
+    # called "value" with the default value_name="value"), even though that
+    # source column disappears from the long-form output.
     melted = pd.melt(
         source,
         id_vars=ids + [marker],
         value_vars=vals,
-        var_name=variable_name,
-        value_name=value_name,
+        var_name=internal_variable,
+        value_name=internal_value,
         ignore_index=False,
     )
 
     # pandas melt is value-column-major; restore deterministic source-row-major ordering.
     order_map = {name: pos for pos, name in enumerate(vals)}
-    melted["__tool29_value_order__"] = melted[variable_name].map(order_map)
-    melted = melted.sort_values([marker, "__tool29_value_order__"], kind="mergesort")
+    melted[value_order] = melted[internal_variable].map(order_map)
+    melted = melted.sort_values([marker, value_order], kind="mergesort")
 
     dropped = 0
     if drop_null_values:
         before = len(melted)
-        melted = melted.loc[melted[value_name].notna()]
+        melted = melted.loc[melted[internal_value].notna()]
         dropped = before - len(melted)
 
-    melted = melted.drop(columns=[marker, "__tool29_value_order__"]).reset_index(drop=True)
+    melted = melted.drop(columns=[marker, value_order]).rename(
+        columns={internal_variable: variable_name, internal_value: value_name}
+    ).reset_index(drop=True)
 
     expansion = round((len(melted) / len(df)), 6) if len(df) else 0.0
 
