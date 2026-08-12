@@ -22,6 +22,8 @@ def ensure_additive_local_schema(database_engine) -> None:
         "workspace_assets": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
         "registered_models": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
         "experiments": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "geographic_boundaries": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "geographic_mappings": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
         "dataset_versions": {"metadata": "JSON"},
         "automation_runs": {
             "tenant_id": "VARCHAR NOT NULL DEFAULT 'default'",

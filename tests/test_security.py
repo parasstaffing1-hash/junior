@@ -63,3 +63,28 @@ def test_workspace_assets_are_tenant_scoped(monkeypatch, tmp_path: Path):
         assert client.get(f"/api/v1/workspaces/finance/assets/{asset_id}", headers=headers_b).status_code == 404
         assert client.post(f"/api/v1/workspaces/finance/assets/{asset_id}/publish", headers=headers_b).status_code == 404
     app.state.engine.dispose()
+
+
+def test_geographic_assets_are_tenant_scoped(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AUTH_MODE", "api_key")
+    monkeypatch.setenv("ADMIN_API_KEY", "bootstrap-secret")
+    app = create_app(database_url="sqlite:///" + str(tmp_path / "geo-security.db"), storage_root=tmp_path / "storage")
+    with TestClient(app) as client:
+        headers_a = {"X-API-Key": "bootstrap-secret", "X-Tenant-ID": "tenant-a"}
+        headers_b = {"X-API-Key": "bootstrap-secret", "X-Tenant-ID": "tenant-b"}
+        payload = {
+            "name": "Tenant A boundary",
+            "country_code": "IN",
+            "admin_level": 1,
+            "source": "test",
+            "source_version": "1",
+            "license": "test",
+            "geojson": {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "A"}, "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}}]},
+        }
+        created = client.post("/api/v1/geographic/boundaries/import", headers=headers_a, json=payload)
+        assert created.status_code == 201, created.text
+        boundary_id = created.json()["boundary_id"]
+        assert client.get("/api/v1/geographic/boundaries", headers=headers_b).json()["boundaries"] == []
+        assert client.get(f"/api/v1/geographic/boundaries/{boundary_id}/geometry", headers=headers_b).status_code == 404
+    app.state.engine.dispose()

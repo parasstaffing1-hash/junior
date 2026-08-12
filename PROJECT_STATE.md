@@ -8,7 +8,8 @@ Updated: 2026-08-12
 - Added durable database-backed jobs with idempotency, leases, heartbeats, bounded retries, interval schedules, worker status, and `scripts/run_worker.py`.
 - Added governed database/REST/Parquet connector adapters with read-only SQL, retries, pagination, SSRF protections, schema-contract validation, and partitioned Parquet storage with predicate pushdown.
 - Added governed semantic metric queries, column-level lineage graphs, Prometheus-compatible request metrics, approval-gated Power BI/Fabric/Graph/Tableau integration contracts, hardened non-root containers, health checks, CI, and database backup tooling.
-- Verification after this increment: focused security/jobs/connectors/storage/migration/application suite passes; full regression remains required before release.
+- Added tenant-scoped geographic boundaries/mappings, governed review threads/comments/approval evidence/shared collections, and a bounded reproducible notebook runtime with allowlisted analysis operations.
+- Verification after this increment: full regression is green at 248 passed; production readiness remains fail-closed until deployment infrastructure and external credentials are configured.
 
 ## Current milestone
 
@@ -95,4 +96,4 @@ Backend capabilities:
 - Live browser flow: India Map Story generated at 1080×1080 with 4/36 regions matched, labels, legend, source and handle verified.
 - Live browser flow: Staff BI Control Center loaded all 8 stages; manual mode returned `READY_FOR_MANUAL_REVIEW`; automatic mode returned `READY_TO_PLAN` with approval gates.
 - Focused staff-control suite: 2 passed.
-- Full post-milestone regression: 206 passed on 2026-08-12.
+- Full post-milestone regression: 248 passed on 2026-08-12.

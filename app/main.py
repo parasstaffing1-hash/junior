@@ -93,6 +93,8 @@ from app.api.ingestion import router as ingestion_router
 from app.api.alerts import router as alerts_router
 from app.api.sql_intelligence import router as sql_intelligence_router
 from app.api.catalog import router as catalog_router
+from app.api.collaboration import router as collaboration_router
+from app.api.notebooks import router as notebooks_router
 from app.core.bi.report_service import build_bi_report
 from app.core.bi.export_formats import INTERACTIVE_EXPORT_FORMATS, resolve_export_formats
 from app.core.projects.catalog import FLAGSHIP_PROJECT_IDS, get_project_spec, list_flagship_project_specs, list_project_specs
@@ -1885,6 +1887,8 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.include_router(alerts_router)
     app.include_router(sql_intelligence_router)
     app.include_router(catalog_router)
+    app.include_router(collaboration_router)
+    app.include_router(notebooks_router)
     app.include_router(connectors_router)
 
     return app

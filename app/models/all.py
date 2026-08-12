@@ -173,6 +173,87 @@ class WorkspaceAsset(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
+class ReviewThread(Base):
+    """Tenant-scoped review thread for governed analyst/BI handoffs."""
+
+    __tablename__ = "review_threads"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("workspace_assets.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="OPEN", index=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    comments = relationship("ReviewComment", back_populates="thread", cascade="all, delete-orphan")
+    decisions = relationship("ReviewDecision", back_populates="thread", cascade="all, delete-orphan")
+
+
+class ReviewComment(Base):
+    """Immutable comment record attached to a review thread."""
+
+    __tablename__ = "review_comments"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    thread_id = Column(String, ForeignKey("review_threads.id"), nullable=False, index=True)
+    author = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+
+    thread = relationship("ReviewThread", back_populates="comments")
+
+
+class ReviewDecision(Base):
+    """Auditable approve/reject decision for a governed handoff."""
+
+    __tablename__ = "review_decisions"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    thread_id = Column(String, ForeignKey("review_threads.id"), nullable=False, index=True)
+    decision = Column(String, nullable=False)
+    approver = Column(String, nullable=False)
+    evidence = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+
+    thread = relationship("ReviewThread", back_populates="decisions")
+
+
+class WorkspaceCollection(Base):
+    """Named, tenant-scoped collection of reusable workspace assets."""
+
+    __tablename__ = "workspace_collections"
+    __table_args__ = (UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_workspace_collection_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    owner = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    items = relationship("WorkspaceCollectionItem", back_populates="collection", cascade="all, delete-orphan")
+
+
+class WorkspaceCollectionItem(Base):
+    __tablename__ = "workspace_collection_items"
+    __table_args__ = (UniqueConstraint("collection_id", "asset_id", name="uq_workspace_collection_asset"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    collection_id = Column(String, ForeignKey("workspace_collections.id"), nullable=False, index=True)
+    asset_id = Column(String, ForeignKey("workspace_assets.id"), nullable=False, index=True)
+    added_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+
+    collection = relationship("WorkspaceCollection", back_populates="items")
+
+
 class RegisteredModel(Base):
     """A governed logical model with one or more immutable versions."""
 
@@ -313,10 +394,11 @@ class GeographicBoundary(Base):
 
     __tablename__ = "geographic_boundaries"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", "source_version", name="uq_geographic_boundary_version"),
+        UniqueConstraint("tenant_id", "workspace_id", "name", "source_version", name="uq_geographic_boundary_version"),
     )
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     workspace_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, nullable=False)
     country_code = Column(String, nullable=False, index=True)
@@ -338,10 +420,11 @@ class GeographicMapping(Base):
 
     __tablename__ = "geographic_mappings"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "normalized_input", "country_code", "admin_level", name="uq_geographic_mapping_scope"),
+        UniqueConstraint("tenant_id", "workspace_id", "normalized_input", "country_code", "admin_level", name="uq_geographic_mapping_scope"),
     )
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     workspace_id = Column(String, nullable=False, default="default", index=True)
     input_value = Column(String, nullable=False)
     normalized_input = Column(String, nullable=False, index=True)

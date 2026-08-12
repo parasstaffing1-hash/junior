@@ -52,6 +52,8 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Tableau workbook export | `GET /api/v1/datasets/{dataset_id}/bi_report/tableau` returns a directly openable `{dataset}_Tableau_Packaged_Workbook.twbx` with local data included; `/tableau_twb` returns the editable `.twb` source, which requires companion data |
 | Versions / lineage / latest analysis | `GET /api/v1/datasets/{dataset_id}/versions`, `/lineage`, and `/analysis` |
 | Governed workspace assets | `GET/POST /api/v1/workspaces/{workspace_id}/assets`, `PUT /assets/{asset_id}`, `/publish`, `/lineage`, and `/validate` |
+| Governed collaboration | `POST/GET /api/v1/workspaces/{workspace_id}/reviews`, review comments and evidence-backed decisions under `/reviews/{review_id}`, plus shared asset collections under `/collections` |
+| Governed notebook workspace | `GET /api/v1/workspaces/{workspace_id}/notebooks`; `POST /api/v1/workspaces/{workspace_id}/notebooks/{asset_id}/run` executes a bounded, reproducible allowlisted analysis DSL with dataset-version lineage |
 | Allowlisted automation | `GET /api/v1/automation/actions` and `POST /api/v1/automation/plan` |
 | Data-intelligence catalog | `GET /api/v1/intelligence/capabilities` |
 | Conversational Data Intelligence | `GET /api/v1/conversation/catalog`; `POST /api/v1/datasets/{dataset_id}/conversation/ask` provides bounded plain-language analysis with answer, intent, execution plan, evidence, scope, provenance, follow-ups, and caveats |

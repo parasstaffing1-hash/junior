@@ -43,9 +43,12 @@ def utc_now() -> datetime:
 
 
 def _load_dataset(request: Request, dataset_id: str):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     db = request.app.state.SessionLocal()
     try:
-        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.tenant_id == actor.tenant_id).first()
         if dataset is None:
             raise GeographicError("DATASET_NOT_FOUND", "Dataset was not found.", {"dataset_id": dataset_id}, status_code=404)
         version = db.query(DatasetVersion).filter(DatasetVersion.id == dataset.current_version_id).first()
@@ -114,10 +117,13 @@ def _public_boundary(boundary: GeographicBoundary) -> dict[str, Any]:
     }
 
 
-def _boundary_and_geometry(request: Request, boundary_id: str):
+def _boundary_and_geometry(request: Request, boundary_id: str, *, tenant_id: str | None = None):
     db = request.app.state.SessionLocal()
     try:
-        boundary = db.query(GeographicBoundary).filter(GeographicBoundary.id == boundary_id).first()
+        query = db.query(GeographicBoundary).filter(GeographicBoundary.id == boundary_id)
+        if tenant_id is not None:
+            query = query.filter(GeographicBoundary.tenant_id == tenant_id)
+        boundary = query.first()
         if boundary is None:
             raise GeographicError("BOUNDARY_NOT_FOUND", "Boundary was not found.", {"boundary_id": boundary_id}, status_code=404)
         path = request.app.state.storage.resolve(boundary.geometry_file)
@@ -128,10 +134,10 @@ def _boundary_and_geometry(request: Request, boundary_id: str):
         db.close()
 
 
-def _manual_mappings(request: Request, workspace_id: str, country: str | None = None, admin_level: int | None = None) -> dict[str, dict[str, Any]]:
+def _manual_mappings(request: Request, workspace_id: str, country: str | None = None, admin_level: int | None = None, *, tenant_id: str = "default") -> dict[str, dict[str, Any]]:
     db = request.app.state.SessionLocal()
     try:
-        query = db.query(GeographicMapping).filter(GeographicMapping.workspace_id == workspace_id)
+        query = db.query(GeographicMapping).filter(GeographicMapping.tenant_id == tenant_id, GeographicMapping.workspace_id == workspace_id)
         if country:
             query = query.filter(GeographicMapping.country_code == country.upper())
         if admin_level is not None:
@@ -192,14 +198,15 @@ def analyze_locations(dataset_id: str, request: Request, payload: dict[str, Any]
 @router.post("/datasets/{dataset_id}/geographic/maps/preview")
 def preview_map(dataset_id: str, request: Request, payload: dict[str, Any] | None = None):
     payload = dict(payload or {})
+    actor = getattr(request.state, "actor", None)
     dataset, version, frame, execution = _load_dataset(request, dataset_id)
     boundary_geojson = None
     boundary_metadata = None
     if payload.get("boundary_id"):
-        boundary_metadata, boundary_geojson = _boundary_and_geometry(request, str(payload["boundary_id"]))
+        boundary_metadata, boundary_geojson = _boundary_and_geometry(request, str(payload["boundary_id"]), tenant_id=actor.tenant_id)
         _validate_map_boundary_scope(payload, boundary_metadata, frame)
     workspace_id = str(payload.get("workspace_id") or "default")
-    mappings = _manual_mappings(request, workspace_id, payload.get("country"), payload.get("admin_level"))
+    mappings = _manual_mappings(request, workspace_id, payload.get("country"), payload.get("admin_level"), tenant_id=actor.tenant_id)
     result = build_geographic_map(frame, payload, boundary_geojson=boundary_geojson, manual_mappings=mappings)
     return {
         "dataset_id": dataset.id,
@@ -213,13 +220,17 @@ def preview_map(dataset_id: str, request: Request, payload: dict[str, Any] | Non
 
 @router.post("/geographic/resolve")
 def resolve_names(request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     values = payload.get("values")
     if not isinstance(values, list) or not values or len(values) > 1_000:
         raise GeographicError("INVALID_VALUES", "values must contain 1–1,000 geographic names.")
     workspace_id = str(payload.get("workspace_id") or "default")
+    authorize(actor, "read", workspace_id=workspace_id)
     country = str(payload.get("country") or "").upper() or None
     admin_level = int(payload["admin_level"]) if payload.get("admin_level") is not None else None
-    mappings = _manual_mappings(request, workspace_id, country, admin_level)
+    mappings = _manual_mappings(request, workspace_id, country, admin_level, tenant_id=actor.tenant_id)
     resolved = [resolve_geography(value, country=country, admin_level=admin_level, manual_mappings=mappings) for value in values]
     statuses: dict[str, int] = {}
     for item in resolved:
@@ -229,24 +240,29 @@ def resolve_names(request: Request, payload: dict[str, Any]):
 
 @router.post("/geographic/mappings", status_code=201)
 def save_mapping(request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     required = ("input", "canonical_name", "canonical_id")
     missing = [key for key in required if not str(payload.get(key) or "").strip()]
     if missing:
         raise GeographicError("MAPPING_FIELDS_REQUIRED", "Manual mapping is incomplete.", {"missing": missing})
     workspace_id = str(payload.get("workspace_id") or "default")
+    authorize(actor, "write", workspace_id=workspace_id)
     country = str(payload.get("country") or "").upper()
     admin_level = int(payload.get("admin_level") or 0)
     normalized = normalize_geo_name(payload["input"])
     db = request.app.state.SessionLocal()
     try:
         mapping = db.query(GeographicMapping).filter(
+            GeographicMapping.tenant_id == actor.tenant_id,
             GeographicMapping.workspace_id == workspace_id,
             GeographicMapping.normalized_input == normalized,
             GeographicMapping.country_code == country,
             GeographicMapping.admin_level == admin_level,
         ).first()
         if mapping is None:
-            mapping = GeographicMapping(workspace_id=workspace_id, input_value=str(payload["input"]), normalized_input=normalized, country_code=country, admin_level=admin_level)
+            mapping = GeographicMapping(tenant_id=actor.tenant_id, workspace_id=workspace_id, input_value=str(payload["input"]), normalized_input=normalized, country_code=country, admin_level=admin_level)
             db.add(mapping)
         mapping.canonical_name = str(payload["canonical_name"])
         mapping.canonical_id = str(payload["canonical_id"])
@@ -264,9 +280,13 @@ def save_mapping(request: Request, payload: dict[str, Any]):
 
 @router.get("/geographic/boundaries")
 def list_boundaries(request: Request, workspace_id: str = "default", country_code: str | None = None, admin_level: int | None = None):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+    authorize(actor, "read", workspace_id=workspace_id)
     db = request.app.state.SessionLocal()
     try:
-        query = db.query(GeographicBoundary).filter(GeographicBoundary.workspace_id == workspace_id)
+        query = db.query(GeographicBoundary).filter(GeographicBoundary.tenant_id == actor.tenant_id, GeographicBoundary.workspace_id == workspace_id)
         if country_code:
             query = query.filter(GeographicBoundary.country_code == country_code.upper())
         if admin_level is not None:
@@ -279,6 +299,9 @@ def list_boundaries(request: Request, workspace_id: str = "default", country_cod
 
 @router.post("/geographic/boundaries/import", status_code=201)
 def import_boundary(request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     required = ("name", "country_code", "admin_level", "source", "source_version", "license", "geojson")
     missing = [key for key in required if payload.get(key) in (None, "")]
     if missing:
@@ -291,6 +314,8 @@ def import_boundary(request: Request, payload: dict[str, Any]):
     if len(country) not in {2, 3} and country not in {"WLD", "WORLD", "GLOBAL"}:
         raise GeographicError("INVALID_COUNTRY_CODE", "country_code must be a 2- or 3-letter ISO-style code, or WLD for a global boundary.")
     boundary_id = str(uuid4())
+    workspace_id = str(payload.get("workspace_id") or "default")
+    authorize(actor, "write", workspace_id=workspace_id)
     storage_key = f"geographic/boundaries/{boundary_id}.geojson"
     path = request.app.state.storage.resolve(storage_key)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,7 +327,8 @@ def import_boundary(request: Request, payload: dict[str, Any]):
     try:
         boundary = GeographicBoundary(
             id=boundary_id,
-            workspace_id=str(payload.get("workspace_id") or "default"),
+            tenant_id=actor.tenant_id,
+            workspace_id=workspace_id,
             name=str(payload["name"]).strip(),
             country_code=country,
             admin_level=int(payload["admin_level"]),
@@ -372,6 +398,10 @@ def import_official_india_boundary(request: Request, payload: dict[str, Any]):
 @router.post("/geographic/boundaries/bootstrap/india-fallback", status_code=201)
 def bootstrap_india_boundary(request: Request):
     """Register a clearly labelled India-only demo fallback; it is not official Survey of India data."""
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+    authorize(actor, "write", workspace_id="default")
     try:
         http_request = UrlRequest(INDIA_BOUNDARY_URL, headers={"User-Agent": "AutomatedDataAnalyst/1.0"})
         with urlopen(http_request, timeout=30) as response:  # noqa: S310 - fixed public-domain URL above
@@ -413,6 +443,7 @@ def bootstrap_india_boundary(request: Request):
     try:
         boundary = GeographicBoundary(
             id=boundary_id,
+            tenant_id=actor.tenant_id,
             workspace_id="default",
             name=payload["name"],
             country_code="IN",
@@ -438,7 +469,7 @@ def bootstrap_india_boundary(request: Request):
         return _public_boundary(boundary)
     except IntegrityError:
         db.rollback()
-        existing = db.query(GeographicBoundary).filter(GeographicBoundary.workspace_id == "default", GeographicBoundary.name == payload["name"], GeographicBoundary.source_version == payload["source_version"]).first()
+        existing = db.query(GeographicBoundary).filter(GeographicBoundary.tenant_id == actor.tenant_id, GeographicBoundary.workspace_id == "default", GeographicBoundary.name == payload["name"], GeographicBoundary.source_version == payload["source_version"]).first()
         path.unlink(missing_ok=True)
         if existing is not None:
             return _public_boundary(existing)
@@ -455,6 +486,10 @@ def bootstrap_india_boundary(request: Request):
 @router.post("/geographic/boundaries/bootstrap/global", status_code=201)
 def bootstrap_world_boundary(request: Request):
     """Register a public-domain Natural Earth country boundary for global map stories."""
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+    authorize(actor, "write", workspace_id="default")
     try:
         http_request = UrlRequest(WORLD_BOUNDARY_URL, headers={"User-Agent": "AutomatedDataAnalyst/1.0"})
         with urlopen(http_request, timeout=30) as response:  # noqa: S310 - fixed public-domain URL above
@@ -514,6 +549,7 @@ def bootstrap_world_boundary(request: Request):
     try:
         boundary = GeographicBoundary(
             id=boundary_id,
+            tenant_id=actor.tenant_id,
             workspace_id="default",
             name=payload["name"],
             country_code=WORLD_BOUNDARY_CODE,
@@ -538,6 +574,7 @@ def bootstrap_world_boundary(request: Request):
     except IntegrityError:
         db.rollback()
         existing = db.query(GeographicBoundary).filter(
+            GeographicBoundary.tenant_id == actor.tenant_id,
             GeographicBoundary.workspace_id == "default",
             GeographicBoundary.name == payload["name"],
             GeographicBoundary.source_version == payload["source_version"],
@@ -556,18 +593,26 @@ def bootstrap_world_boundary(request: Request):
 
 @router.get("/geographic/boundaries/{boundary_id}/geometry")
 def get_boundary_geometry(boundary_id: str, request: Request):
-    _, geometry = _boundary_and_geometry(request, boundary_id)
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+    authorize(actor, "read")
+    _, geometry = _boundary_and_geometry(request, boundary_id, tenant_id=actor.tenant_id)
     return JSONResponse(content=geometry, media_type="application/geo+json")
 
 
 @router.post("/geographic/territories/build")
 def build_territory(request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     boundary_id = str(payload.get("boundary_id") or "")
     property_name = str(payload.get("property") or "")
     values = payload.get("values") or []
     if not boundary_id or not property_name or not isinstance(values, list) or not values:
         raise GeographicError("TERRITORY_FIELDS_REQUIRED", "boundary_id, property, and values are required.")
-    boundary, geometry = _boundary_and_geometry(request, boundary_id)
+    authorize(actor, "analyze")
+    boundary, geometry = _boundary_and_geometry(request, boundary_id, tenant_id=actor.tenant_id)
     selected = {normalize_geo_name(value) for value in values}
     features = [feature for feature in geometry["features"] if normalize_geo_name((feature.get("properties") or {}).get(property_name)) in selected]
     if not features:

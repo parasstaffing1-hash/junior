@@ -67,6 +67,9 @@ out of request logs and the database.
 - `GET /api/v1/platform/cost-report` reports rows scanned, compute time, and
   configured compute-unit cost by dataset and operation.
 - Audit records are written for API requests and security administration.
+- Review threads, comments, approval evidence, shared collections, and bounded
+  notebook runs are tenant-scoped and auditable; notebook execution intentionally
+  uses an allowlisted analysis DSL rather than arbitrary code execution.
 - Dataset imports, automation actions, intelligence jobs, schedules, retries,
   and worker leases are tenant-scoped and persisted in PostgreSQL.
 

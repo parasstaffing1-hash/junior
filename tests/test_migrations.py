@@ -42,6 +42,11 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         "registered_models",
         "model_versions",
         "experiments",
+        "review_threads",
+        "review_comments",
+        "review_decisions",
+        "workspace_collections",
+        "workspace_collection_items",
         "experiment_runs",
         "monitoring_policies",
         "monitoring_runs",
@@ -71,6 +76,8 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
     )
     assert "metadata" in {column["name"] for column in inspector.get_columns("dataset_versions")}
     assert "tenant_id" in {column["name"] for column in inspector.get_columns("workspace_assets")}
+    assert "tenant_id" in {column["name"] for column in inspector.get_columns("geographic_boundaries")}
+    assert "tenant_id" in {column["name"] for column in inspector.get_columns("geographic_mappings")}
     assert "tenant_id" in {column["name"] for column in inspector.get_columns("registered_models")}
     assert "tenant_id" in {column["name"] for column in inspector.get_columns("experiments")}
 
