@@ -156,3 +156,16 @@ class WorkspaceAsset(Base):
     version = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+# Import domain models so Base.metadata includes them for local/test bootstrap and Alembic.
+from app.models.lng import (  # noqa: E402,F401
+    LNGCargo,
+    LNGCompany,
+    LNGBuyerRFQ,
+    LNGLiquefactionProject,
+    LNGMatch,
+    LNGSellerOffer,
+    LNGSpecification,
+    LNGTerminal,
+)
