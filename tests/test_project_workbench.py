@@ -50,10 +50,18 @@ def test_project_catalog_and_validation_endpoints(client):
     assert build.status_code == 200
     assert build.json()["status"] == "COMPLETED"
     assert build.json()["dashboard"]["template"]["id"] == "root_cause"
+    assert build.json()["artifact_formats"]["powerbi"]["filename"] == "superstore_sales_dashboard_PowerBI_PBIP_Project.zip"
+    assert build.json()["artifact_formats"]["tableau"]["filename"] == "superstore_sales_dashboard_Tableau_Packaged_Workbook.twbx"
     for kind in ("powerbi", "tableau", "tableau_twb"):
         artifact = client.get(f"/api/v1/projects/superstore_sales_dashboard/artifacts/{kind}")
         assert artifact.status_code == 200, artifact.text
         assert len(artifact.content) > 100
+    powerbi = client.get("/api/v1/projects/superstore_sales_dashboard/artifacts/powerbi")
+    assert "superstore_sales_dashboard_PowerBI_PBIP_Project.zip" in powerbi.headers["content-disposition"]
+    assert powerbi.headers["x-bi-requires-extraction"] == "true"
+    tableau = client.get("/api/v1/projects/superstore_sales_dashboard/artifacts/tableau")
+    assert "superstore_sales_dashboard_Tableau_Packaged_Workbook.twbx" in tableau.headers["content-disposition"]
+    assert tableau.headers["x-bi-requires-extraction"] == "false"
 
     validation = client.post("/api/v1/project-validation/run", json={"rows": 12})
     assert validation.status_code == 200

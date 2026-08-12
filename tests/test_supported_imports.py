@@ -44,3 +44,29 @@ def test_imports_csv_json_excel_and_parquet(client):
     frame.to_parquet(parquet_buffer, index=False)
     parquet = _upload(client, "sales.parquet", parquet_buffer.getvalue(), "application/octet-stream")
     assert parquet["file_type"] == "parquet"
+
+
+def test_excel_inspection_can_combine_multiple_sheets(client):
+    first = pd.DataFrame({"region": ["North", "South"], "sales": [10, 20]})
+    second = pd.DataFrame({"region": ["East"], "sales": [30]})
+    xlsx_buffer = BytesIO()
+    with pd.ExcelWriter(xlsx_buffer, engine="openpyxl") as writer:
+        first.to_excel(writer, sheet_name="January", index=False)
+        second.to_excel(writer, sheet_name="February", index=False)
+    inspection = client.post(
+        "/api/v1/datasets/import/inspect",
+        files={"file": ("monthly_mis.xlsx", xlsx_buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert inspection.status_code == 200, inspection.text
+    assert inspection.json()["can_combine_sheets"] is True
+
+    imported = client.post(
+        "/api/v1/datasets/import",
+        files={"file": ("monthly_mis.xlsx", xlsx_buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={"sheet_name": "__ALL_SHEETS__"},
+    )
+    assert imported.status_code == 200, imported.text
+    preview = client.get(f"/api/v1/datasets/{imported.json()['dataset_id']}/preview")
+    assert preview.status_code == 200
+    assert preview.json()["preview"]["total_rows"] == 3
+    assert "_source_sheet" in preview.json()["preview"]["columns"]

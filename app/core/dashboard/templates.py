@@ -142,8 +142,8 @@ _TEMPLATES: tuple[dict[str, Any], ...] = (
         "icon": "fa-chart-column",
         "description": "A source-backed executive sales composition using the BIBB Power BI palette, compact KPI band, and ranked performance views.",
         "recommended_for": "Superstore sales, revenue leadership, and executive scorecards",
-        "layout": "performance",
-        "chart_order": ("chart:sales_over_time", "chart:sales_by_country", "chart:sales_by_store", "chart:profit_by_product"),
+        "layout": "diagnostic",
+        "chart_order": ("chart:sales_over_time", "chart:sales_by_country", "chart:profit_by_product", "chart:sales_by_channel", "chart:units_by_product", "chart:profit_over_time"),
         "theme": {
             "accent": "#B2182B",
             "accent_secondary": "#4393C3",

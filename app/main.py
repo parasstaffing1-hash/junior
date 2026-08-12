@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
+import json
 from pathlib import Path
+import re
 from typing import Any, Optional
 from urllib.parse import urlencode
 
@@ -27,7 +30,11 @@ from app.core.dashboard.templates import (
 )
 from app.core.eda.findings import detect_findings
 from app.core.eda.report import generate_eda_report
+from app.core.infographics import InfographicError, build_infographic, catalog as infographic_catalog, parse_pasted_table
 from app.core.enterprise.readiness import capability_catalog, readiness_summary
+from app.core.enterprise.bi_architecture import enterprise_bi_blueprint, senior_bi_capability_matrix
+from app.core.enterprise.staff_control import build_staff_plan, staff_control_center
+from app.core.quality.health_improvement import build_health_improvement_plan
 from app.core.enterprise.workspace import (
     ASSET_STATUSES,
     ASSET_TYPES,
@@ -38,29 +45,126 @@ from app.core.enterprise.workspace import (
 from app.core.kpi.calculator import calculate_kpi
 from app.orchestration.quality_pipeline import QualityPipeline
 from app.core.statistics.report import generate_statistics_report
-from app.core.sql.workbench import SQLWorkbenchError, execute_dataset_sql, validate_read_only_sql
+from app.core.sql.workbench import (
+    SQLWorkbenchError,
+    execute_dataset_sql,
+    execute_sqlite_database_bytes,
+    run_sql_proficiency_benchmark,
+    validate_read_only_sql,
+)
 from app.core.transformation.pipeline import execute_pipeline
 from app.core.visualization.recommender import recommend_charts
 from app.errors import AppError
-from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset
+from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset, GeographicBoundary
 from app.orchestration.automated_analyst import AutomatedAnalyst
 from app.orchestration.platform import (
     PlatformAnalysisError,
+    PLATFORM_ANALYSIS_BUDGET,
     _create_version,
+    attach_analysis_basis,
+    build_analysis_basis,
     jsonable,
     load_current_dataset,
     run_full_platform_analysis,
 )
 from app.core.intake.importer import DatasetImporter
+from app.core.intelligence.common import IntelligenceError, bounded_frame
+from app.api.intelligence import router as intelligence_router
+from app.api.geographic import router as geographic_router
+from app.api.conversation import router as conversation_router
+from app.api.bi_readiness import router as bi_readiness_router
 from app.core.bi.report_service import build_bi_report
-from app.core.projects.catalog import get_project_spec, list_project_specs
+from app.core.bi.export_formats import INTERACTIVE_EXPORT_FORMATS, resolve_export_formats
+from app.core.projects.catalog import FLAGSHIP_PROJECT_IDS, get_project_spec, list_flagship_project_specs, list_project_specs
 from app.core.projects.fixtures import build_project_fixture
 from app.core.projects.workbench import ProjectBuildError, build_project
+from app.core.professional.analysis import build_business_analysis, professional_capability_matrix
 from app.storage.dataset_storage import DatasetStorage
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+
+_EXPORT_FORMATS = {
+    "html": {
+        "format": "html",
+        "suffix": "BI_Report",
+        "extension": "html",
+        "media_type": "text/html",
+        "open_with": "Web browser",
+        "requires_extraction": False,
+        "client_ready": True,
+    },
+    "pdf": {
+        "format": "pdf",
+        "suffix": "BI_Report",
+        "extension": "pdf",
+        "media_type": "application/pdf",
+        "open_with": "PDF reader",
+        "requires_extraction": False,
+        "client_ready": True,
+    },
+    "xlsx": {
+        "format": "excel_xlsx",
+        "suffix": "BI_Report",
+        "extension": "xlsx",
+        "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "open_with": "Microsoft Excel",
+        "requires_extraction": False,
+        "client_ready": True,
+    },
+    "powerbi": {
+        "format": "powerbi_pbip_project",
+        "suffix": "PowerBI_PBIP_Project",
+        "extension": "zip",
+        "client_file_extension": ".pbip",
+        "media_type": "application/zip",
+        "open_with": "Power BI Desktop",
+        "requires_extraction": True,
+        "client_ready": True,
+        "instructions": "Extract the ZIP and open the root .pbip file in Power BI Desktop; keep all project folders together.",
+    },
+    "tableau": {
+        "format": "tableau_packaged_workbook",
+        "suffix": "Tableau_Packaged_Workbook",
+        "extension": "twbx",
+        "client_file_extension": ".twbx",
+        "media_type": "application/zip",
+        "open_with": "Tableau Desktop or Tableau Reader",
+        "requires_extraction": False,
+        "client_ready": True,
+        "instructions": "Open the .twbx file directly in Tableau Desktop or Tableau Reader; the data is included.",
+    },
+    "tableau_twb": {
+        "format": "tableau_workbook_source",
+        "suffix": "Tableau_Workbook_Source",
+        "extension": "twb",
+        "client_file_extension": ".twb",
+        "media_type": "application/xml",
+        "open_with": "Tableau Desktop",
+        "requires_extraction": False,
+        "requires_companion_data": True,
+        "client_ready": False,
+        "instructions": "This editable .twb references data.csv; use the .twbx download for a self-contained client handoff.",
+    },
+}
+
+
+def _safe_export_stem(display_name: str | None) -> str:
+    stem = Path(str(display_name or "dataset")).stem
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_-")
+    return (safe[:80] or "dataset")
+
+
+def _export_descriptor(display_name: str | None, kind: str) -> dict[str, Any]:
+    spec = _EXPORT_FORMATS[kind]
+    filename = f"{_safe_export_stem(display_name)}_{spec['suffix']}.{spec['extension']}"
+    return {
+        key: value
+        for key, value in {**spec, "filename": filename}.items()
+        if key != "suffix"
+    }
 
 
 def _error_response(exc: AppError) -> JSONResponse:
@@ -109,6 +213,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.state.SessionLocal = session_factory
     app.state.storage = storage
     app.state.importer = importer
+    app.state.bi_report_cache = OrderedDict()
+    try:
+        app.state.bi_report_cache_size = max(1, min(10, int(os.getenv("BI_REPORT_CACHE_SIZE", "3"))))
+    except ValueError as exc:
+        raise RuntimeError("BI_REPORT_CACHE_SIZE must be an integer.") from exc
 
     app.add_middleware(
         CORSMiddleware,
@@ -128,6 +237,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.exception_handler(PlatformAnalysisError)
     async def platform_analysis_error_handler(_: Request, exc: PlatformAnalysisError):
         return JSONResponse(status_code=404 if exc.code in {"DATASET_NOT_FOUND", "VERSION_NOT_FOUND"} else 422, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
+
+    @app.exception_handler(IntelligenceError)
+    async def intelligence_error_handler(_: Request, exc: IntelligenceError):
+        return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}})
 
     @app.exception_handler(ProjectBuildError)
     async def project_build_error_handler(_: Request, exc: ProjectBuildError):
@@ -168,7 +281,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: str | None = None,
         segment: str | None = None,
         store: str | None = None,
+        carrier: str | None = None,
+        origin: str | None = None,
+        destination: str | None = None,
+        route: str | None = None,
         template_id: str | None = None,
+        exports: tuple[str, ...] | None = None,
     ):
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
@@ -185,16 +303,34 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 status_code=422,
                 details={"template_id": template_id, "available_template_ids": [item["id"] for item in list_dashboard_templates()]},
             ) from exc
+        selected_exports = resolve_export_formats(exports)
+        cache_key = (
+            str(dataset_id), str(version.id), selected_template["id"],
+            country, product, segment, store, carrier, origin, destination, route,
+            tuple(sorted(selected_exports)),
+        )
+        cache = request.app.state.bi_report_cache
+        if cache_key in cache:
+            cached = cache.pop(cache_key)
+            cache[cache_key] = cached
+            return dataset, cached
         try:
-            frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
+            source_frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
+            frame, execution_metadata = bounded_frame(source_frame, budget=PLATFORM_ANALYSIS_BUDGET)
+            analysis_basis = build_analysis_basis(execution_metadata)
             report = build_bi_report(
                 frame,
                 dataset_name=dataset.name,
                 source_version_id=version.id,
-                filters={"country": country, "product": product, "segment": segment, "store": store},
+                filters={
+                    "country": country, "product": product, "segment": segment, "store": store,
+                    "carrier": carrier, "origin": origin, "destination": destination, "route": route,
+                },
                 template_id=selected_template["id"],
                 output_dir=request.app.state.storage.root / dataset_id / "reports",
+                exports=selected_exports,
             )
+            attach_analysis_basis(report, analysis_basis)
         except Exception as exc:
             raise AppError(
                 "BI_REPORT_FAILED",
@@ -202,18 +338,46 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 status_code=422,
                 details={"dataset_id": dataset_id, "error": str(exc)},
             ) from exc
+        cache[cache_key] = report
+        while len(cache) > request.app.state.bi_report_cache_size:
+            cache.popitem(last=False)
         return dataset, report
 
-    def public_bi_report(dataset_id: str, report: dict, *, country: str | None, product: str | None, segment: str | None, store: str | None = None):
+    def public_bi_report(
+        dataset_id: str,
+        report: dict,
+        *,
+        country: str | None = None,
+        product: str | None = None,
+        segment: str | None = None,
+        store: str | None = None,
+        carrier: str | None = None,
+        origin: str | None = None,
+        destination: str | None = None,
+        route: str | None = None,
+    ):
         template_id = (report.get("dashboard", {}).get("template", {}) or {}).get("id", DEFAULT_DASHBOARD_TEMPLATE_ID)
         query = urlencode({key: value for key, value in {
             "country": country,
             "product": product,
             "segment": segment,
             "store": store,
+            "carrier": carrier,
+            "origin": origin,
+            "destination": destination,
+            "route": route,
             "template_id": template_id,
         }.items() if value})
         suffix = f"?{query}" if query else ""
+        downloads = {
+            "html": f"/api/v1/datasets/{dataset_id}/bi_report/html{suffix}",
+            "pdf": f"/api/v1/datasets/{dataset_id}/bi_report/pdf{suffix}",
+            "xlsx": f"/api/v1/datasets/{dataset_id}/bi_report/xlsx{suffix}",
+            "powerbi": f"/api/v1/datasets/{dataset_id}/bi_report/powerbi{suffix}",
+            "tableau": f"/api/v1/datasets/{dataset_id}/bi_report/tableau{suffix}",
+            "tableau_twb": f"/api/v1/datasets/{dataset_id}/bi_report/tableau_twb{suffix}",
+        }
+        source_name = (report.get("source") or {}).get("name") or dataset_id
         return {
             "report_id": report["report_id"],
             "report": report["report"],
@@ -226,15 +390,155 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             "charts": _remove_artifact_paths(report["charts"]),
             "tables": report["tables"],
             "dashboard": _remove_artifact_paths(report["dashboard"]),
-            "downloads": {
-                "html": f"/api/v1/datasets/{dataset_id}/bi_report/html{suffix}",
-                "pdf": f"/api/v1/datasets/{dataset_id}/bi_report/pdf{suffix}",
-                "xlsx": f"/api/v1/datasets/{dataset_id}/bi_report/xlsx{suffix}",
-                "powerbi": f"/api/v1/datasets/{dataset_id}/bi_report/powerbi{suffix}",
-                "tableau": f"/api/v1/datasets/{dataset_id}/bi_report/tableau{suffix}",
-                "tableau_twb": f"/api/v1/datasets/{dataset_id}/bi_report/tableau_twb{suffix}",
+            "bi_model": report.get("desktop_export_validation", {}).get("powerbi", {}).get("model_contract"),
+            "desktop_export_validation": report.get("desktop_export_validation", {}),
+            "analysis_basis": report.get("analysis_basis"),
+            "downloads": downloads,
+            "download_formats": {
+                kind: {**_export_descriptor(source_name, kind), "url": url}
+                for kind, url in downloads.items()
             },
         }
+
+    def _infographic_options(payload: dict[str, Any], *, source: str) -> dict[str, Any]:
+        allowed = {
+            "panel_type",
+            "title",
+            "subtitle",
+            "category_column",
+            "measure_column",
+            "date_column",
+            "aggregation",
+            "handle",
+            "prefix",
+            "suffix",
+            "geography_column",
+            "boundary_property",
+            "country",
+            "admin_level",
+            "map_palette",
+            "map_classification",
+            "map_classes",
+            "show_labels",
+        }
+        options = {
+            key: value
+            for key, value in payload.items()
+            if key in allowed and value not in (None, "")
+        }
+        options["source"] = str(payload.get("source") or source)
+        return options
+
+    def _infographic_boundary_record(request: Request, boundary_id: str | None) -> tuple[GeographicBoundary, dict[str, Any]] | None:
+        if not boundary_id:
+            return None
+        db = request.app.state.SessionLocal()
+        try:
+            boundary = db.query(GeographicBoundary).filter(GeographicBoundary.id == str(boundary_id)).first()
+            if boundary is None:
+                raise AppError("BOUNDARY_NOT_FOUND", "The selected map boundary was not found.", status_code=404)
+            path = request.app.state.storage.resolve(boundary.geometry_file)
+            if not path.is_file():
+                raise AppError("BOUNDARY_FILE_MISSING", "The selected map boundary geometry is missing.", status_code=500)
+            return boundary, json.loads(path.read_text(encoding="utf-8"))
+        finally:
+            db.close()
+
+    def _infographic_boundary(request: Request, boundary_id: str | None) -> dict[str, Any] | None:
+        record = _infographic_boundary_record(request, boundary_id)
+        return record[1] if record else None
+
+    def _save_infographic(request: Request, generated: dict[str, Any]) -> dict[str, Any]:
+        infographic_id = generated["infographic_id"]
+        storage_key = f"infographics/{infographic_id}.png"
+        path = request.app.state.storage.resolve(storage_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(generated["png_bytes"])
+        source_text = str(generated["spec"].get("source") or "provided data").strip()
+        if source_text.casefold().startswith("source:"):
+            source_text = source_text.split(":", 1)[1].strip()
+        return {
+            "infographic_id": infographic_id,
+            "generated_at": generated["generated_at"],
+            "panel_type": generated["panel_type"],
+            "theme": generated["theme"],
+            "format": generated["format"],
+            "spec": generated["spec"],
+            "byte_size": generated["byte_size"],
+            "image_url": f"/api/v1/infographics/{infographic_id}.png",
+            "download_url": f"/api/v1/infographics/{infographic_id}.png?download=true",
+            "suggested_post": f"{generated['spec'].get('title', 'Data update')}\n\nSource: {source_text}",
+        }
+
+    def _build_infographic_response(frame: pd.DataFrame, payload: dict[str, Any], request: Request, *, source: str) -> dict[str, Any]:
+        work, execution_metadata = bounded_frame(frame, budget=PLATFORM_ANALYSIS_BUDGET)
+        options = _infographic_options(payload, source=source)
+        boundary_record = _infographic_boundary_record(request, payload.get("boundary_id"))
+        boundary = boundary_record[1] if boundary_record else None
+        panel_type = str(payload.get("panel_type") or "").strip().casefold()
+        if boundary_record and panel_type == "india_map_story" and boundary_record[0].country_code != "IN":
+            raise AppError(
+                "INDIA_BOUNDARY_REQUIRED",
+                "India Map Story only accepts an IN state/UT boundary. A global/international boundary is not valid for this output.",
+                status_code=422,
+                details={"selected_boundary_country": boundary_record[0].country_code},
+            )
+        if boundary_record and panel_type == "world_map_story" and boundary_record[0].country_code != "WLD":
+            raise AppError(
+                "GLOBAL_BOUNDARY_REQUIRED",
+                "Global Country Map Story only accepts the WLD country boundary.",
+                status_code=422,
+                details={"selected_boundary_country": boundary_record[0].country_code},
+            )
+        if boundary is not None:
+            options["boundary_geojson"] = boundary
+        try:
+            generated = build_infographic(
+                work,
+                theme_id=payload.get("theme_id"),
+                format_id=payload.get("format_id"),
+                **options,
+            )
+        except InfographicError as exc:
+            raise AppError(exc.code, exc.message, status_code=422, details=exc.details) from exc
+        return {
+            **_save_infographic(request, generated),
+            "source": source,
+            "analysis_basis": build_analysis_basis(execution_metadata),
+            "columns": [str(column) for column in work.columns],
+        }
+
+    @app.get("/api/v1/infographics/catalog")
+    def get_infographic_catalog():
+        return infographic_catalog()
+
+    @app.post("/api/v1/datasets/{dataset_id}/infographics")
+    def create_dataset_infographic(dataset_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+        dataset, _, frame = load_current_dataset(db, request.app.state.storage, dataset_id)
+        return _build_infographic_response(frame, payload or {}, request, source=dataset.name)
+
+    @app.post("/api/v1/infographics/paste")
+    def create_pasted_infographic(payload: dict[str, Any], request: Request):
+        try:
+            frame = parse_pasted_table(str((payload or {}).get("data") or ""))
+        except InfographicError as exc:
+            raise AppError(exc.code, exc.message, status_code=422, details=exc.details) from exc
+        return _build_infographic_response(frame, payload or {}, request, source="data provided by creator")
+
+    @app.get("/api/v1/infographics/{infographic_id}.png")
+    def download_infographic(infographic_id: str, request: Request, download: bool = Query(False)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", infographic_id):
+            raise AppError("INFOGRAPHIC_NOT_FOUND", "The requested infographic does not exist.", status_code=404)
+        path = request.app.state.storage.resolve(f"infographics/{infographic_id}.png")
+        if not path.is_file():
+            raise AppError("INFOGRAPHIC_NOT_FOUND", "The requested infographic does not exist.", status_code=404)
+        disposition = "attachment" if download else "inline"
+        return FileResponse(
+            path,
+            media_type="image/png",
+            filename=f"data-story-{infographic_id[:8]}.png",
+            headers={"Content-Disposition": f'{disposition}; filename="data-story-{infographic_id[:8]}.png"'},
+        )
 
     @app.get("/api/v1/dashboard-templates")
     def get_dashboard_templates():
@@ -246,9 +550,16 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
 
     @app.get("/api/v1/project-catalog")
     def get_project_catalog():
-        """Return the 20 reusable portfolio project specifications."""
+        """Return three flagship projects plus supporting skill drills."""
         projects = list_project_specs()
-        return {"count": len(projects), "projects": projects}
+        flagships = list_flagship_project_specs()
+        return {
+            "count": len(projects),
+            "flagship_count": len(flagships),
+            "flagship_project_ids": list(FLAGSHIP_PROJECT_IDS),
+            "flagship_projects": flagships,
+            "projects": projects,
+        }
 
     @app.get("/api/v1/project-catalog/{project_id}")
     def get_project_catalog_item(project_id: str):
@@ -336,9 +647,64 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     def platform_acquisition_readiness():
         return readiness_summary()
 
+    @app.get("/api/v1/platform/professional-capabilities")
+    def platform_professional_capabilities():
+        """Return the executable analyst/BI acceptance matrix."""
+        return professional_capability_matrix()
+
+    @app.get("/api/v1/platform/enterprise-bi-capabilities")
+    def platform_enterprise_bi_capabilities():
+        """Return the prioritized Senior BI engineering matrix and evidence boundary."""
+        return senior_bi_capability_matrix()
+
+    @app.get("/api/v1/platform/enterprise-bi-blueprint")
+    def platform_enterprise_bi_blueprint(
+        dataset_name: str = Query("Enterprise Analytics", min_length=1, max_length=120),
+        source_rows: int = Query(500_000_000, ge=0, le=5_000_000_000),
+    ):
+        """Generate a reviewable 500M–5B-row BI architecture and deployment contract."""
+        return enterprise_bi_blueprint(dataset_name=dataset_name, source_rows=source_rows)
+
+    @app.get("/api/v1/platform/staff-control-center")
+    def get_staff_control_center(dataset_id: str | None = Query(None, max_length=120)):
+        """Return the unified staff-level automatic/manual operating contract."""
+        return staff_control_center(dataset_id=dataset_id)
+
+    @app.post("/api/v1/platform/staff-control-center/plan")
+    def create_staff_control_plan(payload: dict[str, Any] | None = None):
+        request_payload = payload or {}
+        try:
+            return build_staff_plan(
+                mode=request_payload.get("mode", "automatic"),
+                objective=request_payload.get("objective", "Build a trusted, decision-ready data product"),
+                dataset_id=request_payload.get("dataset_id"),
+                requested_stages=request_payload.get("requested_stages"),
+            )
+        except ValueError as exc:
+            raise AppError("STAFF_CONTROL_PLAN_INVALID", str(exc), status_code=422) from exc
+
+    @app.post("/api/v1/datasets/{dataset_id}/staff-control-center/plan")
+    def create_dataset_staff_control_plan(dataset_id: str, payload: dict[str, Any] | None = None):
+        request_payload = dict(payload or {})
+        request_payload["dataset_id"] = dataset_id
+        try:
+            return build_staff_plan(
+                mode=request_payload.get("mode", "automatic"),
+                objective=request_payload.get("objective", "Build a trusted, decision-ready data product"),
+                dataset_id=dataset_id,
+                requested_stages=request_payload.get("requested_stages"),
+            )
+        except ValueError as exc:
+            raise AppError("STAFF_CONTROL_PLAN_INVALID", str(exc), status_code=422) from exc
+
     @app.post("/api/v1/sql/validate")
     def validate_sql(payload: dict[str, Any] | None = None):
         return validate_read_only_sql((payload or {}).get("sql"))
+
+    @app.post("/api/v1/sql/proficiency-benchmark")
+    def sql_proficiency_benchmark():
+        """Execute the 20-question, 90-minute-equivalent SQL acceptance suite."""
+        return run_sql_proficiency_benchmark()
 
     @app.post("/api/v1/datasets/{dataset_id}/sql/query")
     def query_dataset_with_sql(
@@ -366,6 +732,48 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             "source_version_id": version.id,
             **result,
         }
+
+    @app.post("/api/v1/datasets/{dataset_id}/business-analysis")
+    def analyze_business_question(
+        dataset_id: str,
+        payload: dict[str, Any] | None = None,
+        request: Request = None,
+        db: Session = Depends(get_db),
+    ):
+        body = payload or {}
+        dataset, version, frame = load_dataset_frame(dataset_id, request, db, body.get("version_id"))
+        return {
+            "dataset_id": dataset.id,
+            "source_version_id": version.id,
+            **build_business_analysis(
+                frame,
+                dataset_name=dataset.name,
+                problem=str(body.get("problem") or "").strip() or None,
+            ),
+        }
+
+    @app.post("/api/v1/sql/database-query")
+    async def query_uploaded_sqlite_database(
+        file: UploadFile = File(...),
+        sql: str = Form(...),
+        max_rows: int = Form(500),
+        timeout_seconds: float = Form(5.0),
+    ):
+        """Run one bounded read-only query against a new multi-table SQLite database."""
+        database = await file.read(configured_limit + 1)
+        if len(database) > configured_limit:
+            raise AppError(
+                "UPLOAD_TOO_LARGE",
+                f"Database exceeds the {configured_limit:,}-byte upload limit.",
+                status_code=413,
+            )
+        result = execute_sqlite_database_bytes(
+            database,
+            sql,
+            max_rows=max_rows,
+            timeout_seconds=timeout_seconds,
+        )
+        return {"database_name": file.filename or "uploaded.sqlite", **result}
 
     @app.get("/api/v1/workspaces/{workspace_id}/assets")
     def list_workspace_assets(
@@ -502,6 +910,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
 
     def public_project_result(result: dict[str, Any], *, project_id: str) -> dict[str, Any]:
         """Remove binary/HTML payloads while keeping an API-sized build result."""
+        artifacts = {
+            kind: f"/api/v1/projects/{project_id}/artifacts/{kind}"
+            for kind in ("html", "pdf", "xlsx", "powerbi", "tableau", "tableau_twb")
+            if result.get("files", {}).get(kind)
+        }
         return {
             "project": result["project"],
             "status": result["status"],
@@ -512,10 +925,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             "findings": result.get("findings", []),
             "dashboard": _remove_artifact_paths(result["dashboard"]),
             "validation": result["validation"],
-            "artifacts": {
-                kind: f"/api/v1/projects/{project_id}/artifacts/{kind}"
-                for kind in ("html", "pdf", "xlsx", "powerbi", "tableau", "tableau_twb")
-                if result.get("files", {}).get(kind)
+            "bi_model": result.get("desktop_export_validation", {}).get("powerbi", {}).get("model_contract"),
+            "desktop_export_validation": result.get("desktop_export_validation", {}),
+            "artifacts": artifacts,
+            "artifact_formats": {
+                kind: {**_export_descriptor(project_id, kind), "url": url}
+                for kind, url in artifacts.items()
             },
         }
 
@@ -602,16 +1017,16 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         path = request.app.state.storage.root / "project_builds" / spec.id / artifact_names[kind]
         if not path.is_file():
             raise AppError("ARTIFACT_NOT_FOUND", "Build the project before downloading its artifact.", status_code=404, details={"project_id": spec.id, "kind": kind})
-        media_type = {
-            "html": "text/html",
-            "pdf": "application/pdf",
-            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "powerbi": "application/zip",
-            "tableau": "application/zip",
-            "tableau_twb": "application/xml",
-        }[kind]
-        extension = {"powerbi": "pbip.zip", "tableau": "twbx", "tableau_twb": "twb"}.get(kind, kind)
-        return FileResponse(path, media_type=media_type, filename=f"{spec.id}.{extension}")
+        descriptor = _export_descriptor(spec.id, kind)
+        return FileResponse(
+            path,
+            media_type=descriptor["media_type"],
+            filename=descriptor["filename"],
+            headers={
+                "X-BI-Format": descriptor["format"],
+                "X-BI-Requires-Extraction": str(descriptor["requires_extraction"]).lower(),
+            },
+        )
 
     def frame_preview(frame: pd.DataFrame, limit: int = 20):
         safe = frame.head(max(0, min(limit, 500))).astype(object).where(pd.notna(frame.head(max(0, min(limit, 500)))), None)
@@ -747,6 +1162,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
@@ -758,9 +1177,18 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             product=product,
             segment=segment,
             store=store,
+            carrier=carrier,
+            origin=origin,
+            destination=destination,
+            route=route,
             template_id=template_id,
+            exports=INTERACTIVE_EXPORT_FORMATS,
         )
-        return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
+        return public_bi_report(
+            dataset_id, report,
+            country=country, product=product, segment=segment, store=store,
+            carrier=carrier, origin=origin, destination=destination, route=route,
+        )
 
     def download_bi_report(
         dataset_id: str,
@@ -771,6 +1199,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: str | None,
         segment: str | None,
         store: str | None,
+        carrier: str | None,
+        origin: str | None,
+        destination: str | None,
+        route: str | None,
         template_id: str | None,
     ):
         dataset, report = build_dataset_bi_report(
@@ -781,21 +1213,26 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             product=product,
             segment=segment,
             store=store,
+            carrier=carrier,
+            origin=origin,
+            destination=destination,
+            route=route,
             template_id=template_id,
+            exports=(kind,),
         )
         path = report["files"].get(kind)
         if not path:
             raise AppError("BI_REPORT_FILE_MISSING", "The requested BI report file was not created.", status_code=500, details={"format": kind})
-        extension, media_type = {
-            "html": ("html", "text/html"),
-            "pdf": ("pdf", "application/pdf"),
-            "xlsx": ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-            "powerbi": ("pbip.zip", "application/zip"),
-            "tableau": ("twbx", "application/zip"),
-            "tableau_twb": ("twb", "application/xml"),
-        }[kind]
-        safe_name = f"bi_report_{dataset_id}.{extension}"
-        return FileResponse(path, media_type=media_type, filename=safe_name)
+        descriptor = _export_descriptor(dataset.name, kind)
+        return FileResponse(
+            path,
+            media_type=descriptor["media_type"],
+            filename=descriptor["filename"],
+            headers={
+                "X-BI-Format": descriptor["format"],
+                "X-BI-Requires-Extraction": str(descriptor["requires_extraction"]).lower(),
+            },
+        )
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/html")
     def download_bi_report_html(
@@ -805,10 +1242,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "html", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "html", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/pdf")
     def download_bi_report_pdf(
@@ -818,10 +1259,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "pdf", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/xlsx")
     def download_bi_report_xlsx(
@@ -831,10 +1276,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "xlsx", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/powerbi")
     def download_bi_report_powerbi(
@@ -844,10 +1293,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "powerbi", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "powerbi", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/tableau")
     def download_bi_report_tableau(
@@ -857,10 +1310,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "tableau", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "tableau", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.get("/api/v1/datasets/{dataset_id}/bi_report/tableau_twb")
     def download_bi_report_tableau_twb(
@@ -870,10 +1327,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         product: Optional[str] = Query(None),
         segment: Optional[str] = Query(None),
         store: Optional[str] = Query(None),
+        carrier: Optional[str] = Query(None),
+        origin: Optional[str] = Query(None),
+        destination: Optional[str] = Query(None),
+        route: Optional[str] = Query(None),
         template_id: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        return download_bi_report(dataset_id, request, db, "tableau_twb", country, product, segment, store, template_id)
+        return download_bi_report(dataset_id, request, db, "tableau_twb", country, product, segment, store, carrier, origin, destination, route, template_id)
 
     @app.post("/api/v1/automated-analyst/analyze")
     def analyze_dataset(payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
@@ -885,7 +1346,17 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
 
     @app.get("/api/v1/reports/{dataset_id}")
     def get_standard_report(dataset_id: str, request: Request, country: Optional[str] = Query(None), product: Optional[str] = Query(None), segment: Optional[str] = Query(None), store: Optional[str] = Query(None), template_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
-        _, report = build_dataset_bi_report(dataset_id, request, db, country=country, product=product, segment=segment, store=store, template_id=template_id)
+        _, report = build_dataset_bi_report(
+            dataset_id,
+            request,
+            db,
+            country=country,
+            product=product,
+            segment=segment,
+            store=store,
+            template_id=template_id,
+            exports=INTERACTIVE_EXPORT_FORMATS,
+        )
         return public_bi_report(dataset_id, report, country=country, product=product, segment=segment, store=store)
 
     @app.get("/api/v1/dashboards/{dataset_id}")
@@ -929,6 +1400,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         rows = frame.astype(object).where(pd.notna(frame), None).to_dict(orient="records")
         result = QualityPipeline().analyze(rows, dataset_id=dataset_id, source_version_id=version.id, rules=(payload or {}).get("rules"), columns=(payload or {}).get("columns"))
         return result
+
+    @app.post("/api/v1/datasets/{dataset_id}/quality/improvement-plan")
+    def quality_improvement_plan(dataset_id: str, payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
+        _, version, frame = load_dataset_frame(dataset_id, request, db, (payload or {}).get("version_id"))
+        try:
+            return build_health_improvement_plan(frame, dataset_id=dataset_id, source_version_id=version.id)
+        except Exception as exc:
+            raise AppError("QUALITY_IMPROVEMENT_FAILED", str(exc), status_code=422) from exc
 
     def cleaning_operation(dataset_id: str, payload: dict[str, Any] | None, request: Request, db: Session, apply: bool):
         _, version, frame = load_dataset_frame(dataset_id, request, db, (payload or {}).get("version_id"))
@@ -1173,6 +1652,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.post("/api/v1/excel-reports/generate")
     def generate_excel_report(payload: dict[str, Any] | None = None):
         return generate_report_file(payload, "xlsx")
+
+    app.include_router(intelligence_router)
+    app.include_router(geographic_router)
+    app.include_router(conversation_router)
+    app.include_router(bi_readiness_router)
 
     return app
 

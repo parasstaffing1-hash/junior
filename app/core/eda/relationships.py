@@ -24,9 +24,17 @@ def _strength(v):
     if v<.5:return "moderate"
     return "strong"
 
-def _analyze(df,a,b,alpha,min_expected_threshold):
+def _analyze(df,a,b,alpha,min_expected_threshold,max_cardinality,max_cells):
     pair=df[[a,b]].dropna()
     if len(pair)<2:return {"left":a,"right":b,"status":"insufficient_data","observations":len(pair)}
+    left_levels=int(pair[a].nunique())
+    right_levels=int(pair[b].nunique())
+    if left_levels>max_cardinality or right_levels>max_cardinality or left_levels*right_levels>max_cells:
+        return {
+            "left":a,"right":b,"status":"too_many_levels","observations":len(pair),
+            "left_levels":left_levels,"right_levels":right_levels,
+            "cardinality_limit":max_cardinality,"cell_limit":max_cells,
+        }
     tab=pd.crosstab(pair[a],pair[b])
     if tab.shape[0]<2 or tab.shape[1]<2:
         return {"left":a,"right":b,"status":"insufficient_levels","observations":len(pair),"shape":list(tab.shape)}
@@ -60,10 +68,11 @@ def _analyze(df,a,b,alpha,min_expected_threshold):
         "fisher_exact":fisher,"odds_ratio_2x2":odds
     }
 
-def analyze_categorical_relationships(df:pd.DataFrame,*,left=None,right=None,columns=None,alpha=.05,min_expected_threshold=5,strong_threshold=.5,include_numeric_low_cardinality=True,numeric_cardinality_limit=20):
+def analyze_categorical_relationships(df:pd.DataFrame,*,left=None,right=None,columns=None,alpha=.05,min_expected_threshold=5,strong_threshold=.5,include_numeric_low_cardinality=True,numeric_cardinality_limit=20,max_cardinality=50,max_cells=2500):
     if not isinstance(df,pd.DataFrame):raise RelationshipError("INVALID_DATAFRAME","Input must be a pandas DataFrame.")
     if not 0<alpha<1:raise RelationshipError("INVALID_ALPHA","alpha must be between 0 and 1.")
     if min_expected_threshold<=0:raise RelationshipError("INVALID_EXPECTED_THRESHOLD","min_expected_threshold must be >0.")
+    if max_cardinality<2 or max_cells<4:raise RelationshipError("INVALID_CARDINALITY_LIMIT","Relationship limits are invalid.")
     if not 0<=strong_threshold<=1:raise RelationshipError("INVALID_THRESHOLD","strong_threshold must be in [0,1].")
     if left is not None or right is not None:
         if not left or not right:raise RelationshipError("PAIR_REQUIRED","Both left and right are required.")
@@ -78,10 +87,10 @@ def analyze_categorical_relationships(df:pd.DataFrame,*,left=None,right=None,col
     if unknown:raise RelationshipError("UNKNOWN_COLUMN","Selected column does not exist.",{"columns":unknown})
     if len(set(selected))<2:raise RelationshipError("INSUFFICIENT_COLUMNS","At least two categorical columns are required.")
     pairs=[]
-    if left is not None:pairs=[_analyze(df,left,right,alpha,min_expected_threshold)]
+    if left is not None:pairs=[_analyze(df,left,right,alpha,min_expected_threshold,max_cardinality,max_cells)]
     else:
         for i,a in enumerate(selected):
-            for b in selected[i+1:]:pairs.append(_analyze(df,a,b,alpha,min_expected_threshold))
+            for b in selected[i+1:]:pairs.append(_analyze(df,a,b,alpha,min_expected_threshold,max_cardinality,max_cells))
     findings=[]
     for item in pairs:
         if item.get("status")!="ok":continue
@@ -91,4 +100,9 @@ def analyze_categorical_relationships(df:pd.DataFrame,*,left=None,right=None,col
         if not item["expected_count_diagnostics"]["assumption_ok"]:
             findings.append({"type":"chi_square_assumption_warning","columns":[item["left"],item["right"]],"message":"Chi-square expected-count assumptions may be weak; inspect Fisher exact when 2x2."})
     ranked=sorted(pairs,key=lambda x:-(x.get("cramers_v") or 0))
-    return {"analyzed_columns":selected,"pair_count":len(pairs),"relationships":pairs,"strongest_relationships":ranked[:20],"findings":findings}
+    return {
+        "analyzed_columns":selected,"pair_count":len(pairs),"relationships":pairs,
+        "strongest_relationships":ranked[:20],"findings":findings,
+        "limits":{"max_cardinality":max_cardinality,"max_cells":max_cells},
+        "skipped_pair_count":sum(item.get("status")=="too_many_levels" for item in pairs),
+    }

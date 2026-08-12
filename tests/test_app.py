@@ -5,6 +5,9 @@ import json
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
+from app.core.intelligence.common import ExecutionBudget
+from app.orchestration import platform
+
 
 def _import_dataset(client, csv_file):
     response = client.post("/api/v1/datasets/import", files=csv_file)
@@ -16,7 +19,8 @@ def test_health_and_readiness(client):
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert "Automated Data Analyst" in dashboard.text
-    assert "Acquisition readiness" in dashboard.text
+    # The home page opens on the data-ingestion workflow, not on platform status panels.
+    assert "Get Data" in dashboard.text
     assert client.get("/health").json() == {"status": "ok"}
     assert client.get("/health/live").json() == {"status": "ok"}
     assert client.get("/health/ready").json() == {"status": "ready"}
@@ -68,6 +72,34 @@ def test_automated_analyst_creates_clean_version_and_updates_preview(client, csv
     assert listed.json()[0]["health_score"]["score"] == body["initial_health_score"]
 
 
+def test_automated_analyst_bounds_large_interactive_runs(client, monkeypatch):
+    monkeypatch.setattr(platform, "PLATFORM_ANALYSIS_BUDGET", ExecutionBudget(max_rows=100, max_features=250))
+    rows = "".join(f"Customer {index},{20 + index % 50},Region {index % 4}\n" for index in range(101))
+    imported = _import_dataset(client, {
+        "file": (
+            "large.csv",
+            f"name,age,region\n{rows}".encode("utf-8"),
+            "text/csv",
+        )
+    })
+
+    response = client.post(f"/api/v1/datasets/{imported['dataset_id']}/automated_analyst")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["analysis_basis"] == {
+        "source_row_count": 101,
+        "analysis_row_count": 100,
+        "sampled": True,
+        "sampling_method": "deterministic_random_sample",
+        "random_state": 42,
+        "note": "Interactive findings and exports use a deterministic sample. Apply a reviewed pipeline for a full-source transformation.",
+    }
+    assert body["cleaned"] is False
+    assert body["cleaning"]["analysis_only"] is True
+    assert body["report"]["analysis_basis"] == body["analysis_basis"]
+
+
 def test_missing_dataset_is_a_structured_404(client):
     response = client.get("/api/v1/datasets/not-a-real-id/preview")
     assert response.status_code == 404
@@ -103,6 +135,22 @@ def test_bi_report_dashboard_filters_and_exports(client):
     assert {item["title"] for item in report["charts"]} == {"Sales by country", "Profit by product", "Sales trend over time"}
     assert report["dashboard"]["layout_validation"]["valid"] is True
     assert all("artifact_path" not in chart for chart in report["charts"])
+    assert report["download_formats"]["powerbi"] == {
+        "format": "powerbi_pbip_project",
+        "extension": "zip",
+        "client_file_extension": ".pbip",
+        "media_type": "application/zip",
+        "open_with": "Power BI Desktop",
+        "requires_extraction": True,
+        "client_ready": True,
+        "instructions": "Extract the ZIP and open the root .pbip file in Power BI Desktop; keep all project folders together.",
+        "filename": "sales_PowerBI_PBIP_Project.zip",
+        "url": report["downloads"]["powerbi"],
+    }
+    assert report["download_formats"]["tableau"]["filename"] == "sales_Tableau_Packaged_Workbook.twbx"
+    assert report["download_formats"]["tableau"]["requires_extraction"] is False
+    assert report["download_formats"]["tableau"]["client_ready"] is True
+    assert report["download_formats"]["tableau_twb"]["requires_companion_data"] is True
 
     for file_format, content_type, signature in (
         ("html", "text/html", b"<!doctype html>"),
@@ -118,7 +166,11 @@ def test_bi_report_dashboard_filters_and_exports(client):
         assert exported.content.startswith(signature)
         assert len(exported.content) > 100
 
-    with ZipFile(BytesIO(client.get(f"/api/v1/datasets/{dataset_id}/bi_report/powerbi").content)) as powerbi:
+    powerbi_response = client.get(f"/api/v1/datasets/{dataset_id}/bi_report/powerbi")
+    assert "sales_PowerBI_PBIP_Project.zip" in powerbi_response.headers["content-disposition"]
+    assert powerbi_response.headers["x-bi-format"] == "powerbi_pbip_project"
+    assert powerbi_response.headers["x-bi-requires-extraction"] == "true"
+    with ZipFile(BytesIO(powerbi_response.content)) as powerbi:
         names = set(powerbi.namelist())
         project_file = next(name for name in names if name.endswith(".pbip"))
         project = json.loads(powerbi.read(project_file))
@@ -127,13 +179,32 @@ def test_bi_report_dashboard_filters_and_exports(client):
         assert any(name.endswith(".SemanticModel/definition.pbism") for name in names)
         assert any(name.endswith(".SemanticModel/model.bim") for name in names)
         assert "data/data.csv" in names
+        assert "OPEN_IN_POWER_BI.txt" in names
+        assert project_file in powerbi.read("OPEN_IN_POWER_BI.txt").decode("utf-8")
         assert json.loads(powerbi.read(f"{report_folder}/definition.pbir"))["datasetReference"]["byPath"]["path"].startswith("../")
+        export_manifest = json.loads(powerbi.read("export_manifest.json"))
+        assert export_manifest["client_handoff"] == {
+            "download_extension": ".zip",
+            "project_file": project_file,
+            "open_with": "Power BI Desktop",
+            "requires_extraction": True,
+        }
 
     tableau_package = client.get(f"/api/v1/datasets/{dataset_id}/bi_report/tableau")
+    assert "sales_Tableau_Packaged_Workbook.twbx" in tableau_package.headers["content-disposition"]
+    assert tableau_package.headers["x-bi-format"] == "tableau_packaged_workbook"
+    assert tableau_package.headers["x-bi-requires-extraction"] == "false"
     with ZipFile(BytesIO(tableau_package.content)) as tableau:
         assert "report.twb" in tableau.namelist()
         assert "data.csv" in tableau.namelist()
+        assert "OPEN_IN_TABLEAU.txt" in tableau.namelist()
+        assert "open the downloaded .twbx file directly" in tableau.read("OPEN_IN_TABLEAU.txt").decode("utf-8").casefold()
+        assert json.loads(tableau.read("export_manifest.json"))["requires_extraction"] is False
         ET.fromstring(tableau.read("report.twb"))
+
+    tableau_source = client.get(f"/api/v1/datasets/{dataset_id}/bi_report/tableau_twb")
+    assert "sales_Tableau_Workbook_Source.twb" in tableau_source.headers["content-disposition"]
+    assert tableau_source.headers["x-bi-format"] == "tableau_workbook_source"
 
     filtered = client.get(f"/api/v1/datasets/{dataset_id}/bi_report?country=Canada")
     assert filtered.status_code == 200
@@ -223,7 +294,9 @@ def test_unified_api_groups_and_full_automated_workflow(client):
     body = analysis.json()
     assert body["status"] == "COMPLETED_AUTOMATED_ANALYST"
     assert "statistics" in body and "eda" in body and "findings" in body
-    assert body["report"]["files"]["pdf"]
+    # The interactive response supplies the HTML dashboard first. PDF/XLSX and
+    # desktop packages are generated when their explicit download URL is used.
+    assert body["report"]["files"]["html"]
 
     versions = client.get(f"/api/v1/datasets/{dataset_id}/versions")
     lineage = client.get(f"/api/v1/datasets/{dataset_id}/lineage")

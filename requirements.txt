@@ -7,6 +7,7 @@ pandas>=2.2,<4
 numpy>=1.26,<3
 scipy>=1.13,<2
 scikit-learn>=1.5,<2
+joblib>=1.4,<2
 statsmodels>=0.14,<1
 matplotlib>=3.9,<4
 reportlab>=4,<5

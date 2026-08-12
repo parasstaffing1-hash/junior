@@ -29,11 +29,26 @@ def _cramers_v(a,b):
     denom=min(kcorr-1,rcorr-1)
     return None if denom<=0 else math.sqrt(phi2corr/denom)
 
-def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_threshold=.01,high_cardinality_threshold=50,strong_association_threshold=.5,include_numeric_low_cardinality=True,numeric_cardinality_limit=20):
+def analyze_categorical_eda(
+    df:pd.DataFrame,
+    *,
+    columns=None,
+    top_n=10,
+    rare_threshold=.01,
+    high_cardinality_threshold=50,
+    strong_association_threshold=.5,
+    include_numeric_low_cardinality=True,
+    numeric_cardinality_limit=20,
+    association_cardinality_limit=50,
+    association_sample_limit=5000,
+    random_state=42,
+):
     if not isinstance(df,pd.DataFrame):raise CategoricalEDAError("INVALID_DATAFRAME","Input must be a pandas DataFrame.")
     if top_n<1 or top_n>100:raise CategoricalEDAError("INVALID_TOP_N","top_n must be between 1 and 100.")
     if not 0<=rare_threshold<=1:raise CategoricalEDAError("INVALID_THRESHOLD","rare_threshold must be in [0,1].")
     if high_cardinality_threshold<2:raise CategoricalEDAError("INVALID_THRESHOLD","high_cardinality_threshold must be >=2.")
+    if association_cardinality_limit<2:raise CategoricalEDAError("INVALID_THRESHOLD","association_cardinality_limit must be >=2.")
+    if association_sample_limit<2:raise CategoricalEDAError("INVALID_SAMPLE_LIMIT","association_sample_limit must be >=2.")
     if not 0<=strong_association_threshold<=1:raise CategoricalEDAError("INVALID_THRESHOLD","strong_association_threshold must be in [0,1].")
 
     if columns is None:
@@ -55,7 +70,9 @@ def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_thresho
         top=[]
         for val,count in vc.head(top_n).items():
             top.append({"value":str(val),"count":int(count),"share":float(count/n) if n else 0.0})
-        rare=[{"value":str(val),"count":int(count),"share":float(count/n)} for val,count in vc.items() if n and count/n<rare_threshold]
+        rare_counts=vc[(vc/n)<rare_threshold] if n else vc.iloc[0:0]
+        rare=[{"value":str(val),"count":int(count),"share":float(count/n)} for val,count in rare_counts.head(100).items()]
+        rare_count=int(len(rare_counts))
         mode=None if vc.empty else str(vc.index[0]);mode_share=0.0 if vc.empty else float(vc.iloc[0]/n)
         entropy=_entropy(vc.tolist())
         flags=[]
@@ -65,7 +82,7 @@ def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_thresho
         if n>=20 and unique/n>=.98:flags.append("id_like_high_uniqueness")
         if mode_share>=.9 and unique>1:flags.append("high_imbalance")
         if missing/nrows>=.2 if nrows else False:flags.append("high_missingness")
-        if rare:flags.append("rare_categories")
+        if rare_count:flags.append("rare_categories")
         messages={
             "constant_or_empty":f"{c} has little or no categorical variation.",
             "binary":f"{c} is binary.",
@@ -73,7 +90,7 @@ def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_thresho
             "id_like_high_uniqueness":f"{c} is nearly unique per row and may be identifier-like.",
             "high_imbalance":f"{c} is highly imbalanced; top category share is {mode_share:.1%}.",
             "high_missingness":f"{c} has {missing/nrows:.1%} missing values." if nrows else f"{c} has missing values.",
-            "rare_categories":f"{c} contains {len(rare)} rare category value(s).",
+            "rare_categories":f"{c} contains {rare_count} rare category value(s).",
         }
         for f in flags:findings.append({"type":f,"column":c,"message":messages[f]})
         profiles.append({
@@ -81,13 +98,23 @@ def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_thresho
             "missing_rate":missing/nrows if nrows else 0.0,"unique_count":unique,
             "cardinality_ratio":unique/n if n else 0.0,"mode":mode,"mode_share":mode_share,
             "normalized_entropy":entropy,"concentration":1-entropy,
-            "top_values":top,"rare_values":rare[:100],"rare_value_count":len(rare),"flags":flags
+            "top_values":top,"rare_values":rare,"rare_value_count":rare_count,"flags":flags
         })
 
+    profile_by_column={profile["column"]:profile for profile in profiles}
+    association_columns=[
+        c for c in columns
+        if profile_by_column[c]["unique_count"]<=association_cardinality_limit
+    ]
+    skipped_association_columns=[c for c in columns if c not in association_columns]
+    relationship_df=(
+        df.sample(n=association_sample_limit,random_state=random_state).sort_index()
+        if len(df)>association_sample_limit else df
+    )
     associations=[]
-    for i,a in enumerate(columns):
-        for b in columns[i+1:]:
-            pair=df[[a,b]].dropna()
+    for i,a in enumerate(association_columns):
+        for b in association_columns[i+1:]:
+            pair=relationship_df[[a,b]].dropna()
             v=_cramers_v(pair[a],pair[b]) if len(pair) else None
             item={"left":a,"right":b,"cramers_v":v,"observations":len(pair)}
             associations.append(item)
@@ -97,6 +124,13 @@ def analyze_categorical_eda(df:pd.DataFrame,*,columns=None,top_n=10,rare_thresho
     return {
         "row_count":nrows,"dataset_column_count":len(df.columns),"analyzed_columns":columns,
         "profiles":profiles,"strongest_associations":associations[:20],"findings":findings,
+        "association_basis":{
+            "rows_analyzed":len(relationship_df),"full_row_count":nrows,
+            "sampled":len(relationship_df)<nrows,"random_state":random_state,
+            "cardinality_limit":association_cardinality_limit,
+            "eligible_columns":association_columns,
+            "skipped_high_cardinality_columns":skipped_association_columns,
+        },
         "summary":{
             "categorical_columns":len(columns),
             "high_cardinality_columns":sum("high_cardinality" in p["flags"] for p in profiles),

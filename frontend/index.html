@@ -4,390 +4,819 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Automated Data Analyst v1.0</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.css" media="print" onload="this.media='all'">
     <link rel="stylesheet" href="/static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js" onload="window.dispatchEvent(new Event('echarts-ready'))"></script>
 </head>
 <body>
-    <!-- Background Elements -->
-    <div class="bg-shape shape-1"></div>
-    <div class="bg-shape shape-2"></div>
-    
-    <!-- Top Navigation -->
-    <nav class="top-nav">
-        <div class="nav-brand">
-            <i class="fa-solid fa-chart-network"></i> Automated Data Analyst
-        </div>
-        <div class="nav-links">
-            <a href="#" class="active" onclick="App.navigate('home')">Datasets</a>
-            <a href="#">Automated Analyst</a>
-            <a href="#">Reports</a>
-            <a href="#">Automation</a>
-        </div>
-        <div class="nav-actions">
-            <a href="#"><i class="fa-solid fa-gear"></i> Settings</a>
-            <a href="#"><i class="fa-solid fa-user-circle"></i> Workspace</a>
-        </div>
-    </nav>
-
-    <div class="container" id="app-container">
-        
-        <!-- ==============================
-             VIEW 1: LANDING & UPLOAD
-             ============================== -->
-        <div id="view-home" class="view-section active">
-            <header class="hero">
-                <h1>AUTOMATED <span>DATA ANALYST</span></h1>
-                <p>Upload your business data. Get cleaned data, insights, KPIs, dashboards and reports automatically.</p>
-            </header>
-
-            <main>
-                <section class="acquisition-cockpit card" id="acquisition-cockpit" aria-labelledby="acquisition-title">
-                    <div class="acquisition-heading">
-                        <div>
-                            <span class="dashboard-control-label">Enterprise control plane</span>
-                            <h2 id="acquisition-title">Acquisition readiness</h2>
-                            <p>Evidence-based coverage across data, analysis, BI, governance, security and operations.</p>
-                        </div>
-                        <div class="readiness-score" id="readiness-score" aria-live="polite"><strong>--</strong><span>/ 100</span></div>
-                    </div>
-                    <div class="readiness-status" id="readiness-status">Loading verified platform capabilities...</div>
-                    <div class="readiness-domains" id="readiness-domains"></div>
-                    <div class="readiness-blockers" id="readiness-blockers"></div>
-                </section>
-
-                <!-- Data Sources Section -->
-                <section class="sources-section" id="sources-section">
-                    <div class="sources-header">
-                        <h2>Get Data</h2>
-                        <p>Connect to data from multiple sources to start building insights.</p>
-                    </div>
-                    
-                    <div class="connector-grid">
-                        <!-- Excel -->
-                        <div class="connector-tile" onclick="document.getElementById('file-input-excel').click()">
-                            <div class="connector-icon excel"><i class="fa-solid fa-file-excel"></i></div>
-                            <div class="connector-info">
-                                <h4>Excel Workbook</h4>
-                                <p>.xlsx, .xls</p>
-                            </div>
-                            <input type="file" id="file-input-excel" accept=".xlsx,.xls" hidden onchange="App.handleFileUpload(this.files)">
-                        </div>
-                        
-                        <!-- CSV -->
-                        <div class="connector-tile" onclick="document.getElementById('file-input-csv').click()">
-                            <div class="connector-icon csv"><i class="fa-solid fa-file-csv"></i></div>
-                            <div class="connector-info">
-                                <h4>Text / CSV</h4>
-                                <p>.csv, .tsv, .txt</p>
-                            </div>
-                            <input type="file" id="file-input-csv" accept=".csv,.tsv,.txt" hidden onchange="App.handleFileUpload(this.files)">
-                        </div>
-
-                        <!-- JSON -->
-                        <div class="connector-tile" onclick="document.getElementById('file-input-json').click()">
-                            <div class="connector-icon json"><i class="fa-brands fa-js"></i></div>
-                            <div class="connector-info">
-                                <h4>JSON Data</h4>
-                                <p>.json, .ndjson</p>
-                            </div>
-                            <input type="file" id="file-input-json" accept=".json,.jsonl,.ndjson" hidden onchange="App.handleFileUpload(this.files)">
-                        </div>
-
-                        <!-- Parquet -->
-                        <div class="connector-tile" onclick="document.getElementById('file-input-parquet').click()">
-                            <div class="connector-icon parquet"><i class="fa-solid fa-database"></i></div>
-                            <div class="connector-info">
-                                <h4>Parquet</h4>
-                                <p>.parquet</p>
-                            </div>
-                            <input type="file" id="file-input-parquet" accept=".parquet" hidden onchange="App.handleFileUpload(this.files)">
-                        </div>
-
-                        <!-- SQLite -->
-                        <div class="connector-tile" onclick="document.getElementById('file-input-sqlite').click()">
-                            <div class="connector-icon sqlite"><i class="fa-solid fa-server"></i></div>
-                            <div class="connector-info">
-                                <h4>SQLite Database</h4>
-                                <p>.sqlite, .db</p>
-                            </div>
-                            <input type="file" id="file-input-sqlite" accept=".sqlite,.db" hidden onchange="App.handleFileUpload(this.files)">
-                        </div>
-
-                        <!-- Drag & Drop Fallback -->
-                        <div class="connector-tile dropzone-tile" id="drop-zone">
-                            <div class="connector-icon generic"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                            <div class="connector-info">
-                                <h4>Drag & Drop</h4>
-                                <p>Drop any supported file here</p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="upload-progress hidden" id="upload-progress">
-                        <div class="spinner"></div>
-                        <p id="upload-status-text">Uploading and inspecting dataset...</p>
-                    </div>
-                </section>
-
-                <!-- Excel Sheet Selection Modal/Section -->
-                <section class="card excel-selection-section hidden" id="excel-selection-section">
-                    <h3><i class="fa-solid fa-file-excel"></i> Workbook detected</h3>
-                    <p id="excel-sheet-count">Select a sheet to analyze:</p>
-                    <div class="sheet-list" id="sheet-list">
-                        <!-- Populated by JS -->
-                    </div>
-                </section>
-
-                <!-- Recent Datasets -->
-                <section class="recent-datasets" id="recent-datasets-section">
-                    <h3>RECENT DATASETS</h3>
-                    <div class="dataset-grid" id="recent-datasets-grid">
-                        <p class="empty-text">No datasets yet. Upload your first dataset above.</p>
-                    </div>
-                </section>
-
-                <!-- Portfolio project workbench -->
-                <section class="project-lab card" id="project-lab">
-                    <div class="project-lab-header">
-                        <div>
-                            <span class="dashboard-control-label">Portfolio project workbench</span>
-                            <h3>Build the 20 reference analytics projects</h3>
-                            <p>Use deterministic validation fixtures or switch to an uploaded dataset through the API. Every build uses a selectable BI dashboard template and produces HTML, PDF, Excel, Power BI PBIP, and Tableau TWBX/TWB artifacts.</p>
-                        </div>
-                        <button type="button" class="btn btn-primary" id="project-build-all" onclick="App.buildAllPortfolioProjects()"><i class="fa-solid fa-list-check"></i> Validate all 20</button>
-                    </div>
-                    <div class="project-catalog-grid" id="project-catalog-grid">
-                        <p class="empty-text">Loading portfolio projects...</p>
-                    </div>
-                    <div id="project-validation-results" aria-live="polite"></div>
-                </section>
-            </main>
-        </div>
+    <div class="notion-app">
 
         <!-- ==============================
-             VIEW 2: DATASET OVERVIEW
+             NOTION-STYLE LEFT SIDEBAR
              ============================== -->
-        <div id="view-dataset-overview" class="view-section hidden">
-            <div class="overview-header">
-                <div>
-                    <h2 id="overview-filename">Dataset.xlsx</h2>
-                    <p class="version-badge">Current Version: V1</p>
+        <aside class="notion-sidebar" id="notion-sidebar">
+            <div class="sidebar-workspace" onclick="App.navigate('home')" title="Automated Data Analyst workspace">
+                <div class="workspace-icon"><i class="fa-solid fa-chart-simple"></i></div>
+                <div class="workspace-name">Automated Data Analyst</div>
+                <i class="fa-solid fa-angle-down workspace-caret"></i>
+            </div>
+
+            <div class="sidebar-scroll">
+                <a class="sidebar-item" href="/docs" target="_blank" rel="noopener">
+                    <i class="fa-solid fa-book-open sidebar-item-icon"></i><span>API Docs</span>
+                </a>
+                <div class="sidebar-item" id="side-nav-home" onclick="App.navigate('home')">
+                    <i class="fa-solid fa-house sidebar-item-icon"></i><span>Home</span>
                 </div>
-                <div class="action-buttons">
-                    <button class="btn btn-outline" onclick="App.exploreManually()">
-                        <i class="fa-solid fa-sliders"></i> Explore Manually
-                    </button>
-                    <button class="btn btn-outline" onclick="App.generateBIReport()">
-                        <i class="fa-solid fa-chart-column"></i> Generate BI Report
-                    </button>
-                    <button class="btn btn-primary" onclick="App.runAutoAnalyst()">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Run Automated Analysis
-                    </button>
+                <div class="sidebar-item" id="side-nav-get-data" onclick="App.navigate('home')">
+                    <i class="fa-solid fa-arrow-up-from-bracket sidebar-item-icon"></i><span>Get Data</span>
+                </div>
+
+                <div class="sidebar-section-label">Datasets</div>
+                <div class="sidebar-dataset-list" id="sidebar-dataset-list">
+                    <p class="sidebar-empty">No datasets yet</p>
+                </div>
+
+                <div class="sidebar-section-label">Analyze</div>
+                <div class="sidebar-item" id="nav-dashboard" onclick="App.openWorkspace('dashboard')">
+                    <i class="fa-solid fa-gauge-high sidebar-item-icon"></i><span>Dashboard</span>
+                </div>
+                <div class="sidebar-item" id="nav-conversation" onclick="App.openWorkspace('conversation')">
+                    <i class="fa-solid fa-comments sidebar-item-icon"></i><span>Ask Data</span>
+                </div>
+                <div class="sidebar-item" id="nav-quality" onclick="App.openWorkspace('quality')">
+                    <i class="fa-solid fa-shield-heart sidebar-item-icon"></i><span>Quality</span>
+                </div>
+                <div class="sidebar-item" id="nav-bi-readiness" onclick="App.openWorkspace('bi-readiness')">
+                    <i class="fa-solid fa-layer-group sidebar-item-icon"></i><span>BI-ready data</span>
+                </div>
+                <div class="sidebar-item" id="nav-sql" onclick="App.openWorkspace('sql')">
+                    <i class="fa-solid fa-code sidebar-item-icon"></i><span>SQL Lab</span>
+                </div>
+                <div class="sidebar-item" id="nav-statistics" onclick="App.openWorkspace('statistics')">
+                    <i class="fa-solid fa-calculator sidebar-item-icon"></i><span>Statistics</span>
+                </div>
+                <div class="sidebar-item" id="nav-eda" onclick="App.openWorkspace('eda')">
+                    <i class="fa-solid fa-magnifying-glass-chart sidebar-item-icon"></i><span>EDA</span>
+                </div>
+                <div class="sidebar-item" id="nav-forecast" onclick="App.openWorkspace('forecast')">
+                    <i class="fa-solid fa-chart-line sidebar-item-icon"></i><span>Forecast</span>
+                </div>
+                <div class="sidebar-item" id="nav-machine-learning" onclick="App.openWorkspace('machine-learning')">
+                    <i class="fa-solid fa-brain sidebar-item-icon"></i><span>Machine Learning</span>
+                </div>
+                <div class="sidebar-item" id="nav-geographic" onclick="App.openWorkspace('geographic')">
+                    <i class="fa-solid fa-earth-asia sidebar-item-icon"></i><span>Geographic Intelligence</span>
+                </div>
+
+                <div class="sidebar-section-label">Operate</div>
+                <div class="sidebar-item" id="nav-models" onclick="App.openWorkspace('models')">
+                    <i class="fa-solid fa-cubes sidebar-item-icon"></i><span>Models</span>
+                </div>
+                <div class="sidebar-item" id="nav-monitoring" onclick="App.openWorkspace('monitoring')">
+                    <i class="fa-solid fa-heart-pulse sidebar-item-icon"></i><span>Monitoring</span>
+                </div>
+                <div class="sidebar-item" id="nav-data-engineering" onclick="App.openWorkspace('data-engineering')">
+                    <i class="fa-solid fa-diagram-project sidebar-item-icon"></i><span>Data Engineering</span>
+                </div>
+                <div class="sidebar-item" id="nav-automation" onclick="App.openWorkspace('automation')">
+                    <i class="fa-solid fa-wand-magic-sparkles sidebar-item-icon"></i><span>Automation</span>
+                </div>
+
+                <div class="sidebar-section-label">Output</div>
+                <div class="sidebar-item" id="nav-infographics" onclick="App.openWorkspace('infographics')">
+                    <i class="fa-solid fa-wand-magic-sparkles sidebar-item-icon"></i><span>Infographics</span>
+                </div>
+                <div class="sidebar-item" id="nav-reports" onclick="App.openWorkspace('reports')">
+                    <i class="fa-solid fa-file-arrow-down sidebar-item-icon"></i><span>Reports</span>
                 </div>
             </div>
 
-            <div class="stats-cards">
-                <div class="stat-card">
-                    <i class="fa-solid fa-list-ol"></i>
-                    <div>
-                        <p>Rows</p>
-                        <h4 id="overview-rows">--</h4>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <i class="fa-solid fa-columns"></i>
-                    <div>
-                        <p>Columns</p>
-                        <h4 id="overview-cols">--</h4>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <i class="fa-solid fa-heart-pulse"></i>
-                    <div>
-                        <p>Health Score</p>
-                        <h4 id="overview-health">--</h4>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                    <div>
-                        <p>Missing</p>
-                        <h4 id="overview-missing">--</h4>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <i class="fa-solid fa-copy"></i>
-                    <div>
-                        <p>Duplicates</p>
-                        <h4 id="overview-duplicates">--</h4>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <i class="fa-solid fa-shield-halved"></i>
-                    <div>
-                        <p>Validation</p>
-                        <h4 id="overview-validation">Pending</h4>
-                    </div>
+            <div class="sidebar-footer">
+                <div class="sidebar-item" id="nav-settings" onclick="App.openSettings()" role="button" tabindex="0" onkeydown="if(event.key === 'Enter' || event.key === ' ') App.openSettings()">
+                    <i class="fa-solid fa-gear sidebar-item-icon"></i><span>Settings</span>
                 </div>
             </div>
-
-            <div class="card preview-card">
-                <h3><i class="fa-solid fa-table"></i> Data Preview</h3>
-                <div class="table-container">
-                    <table id="overview-preview-table">
-                        <thead><tr id="overview-preview-thead"></tr></thead>
-                        <tbody id="overview-preview-tbody"></tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <!-- Automated Analysis Progress Modal -->
-            <div class="progress-modal hidden" id="analysis-progress">
-                <div class="progress-box">
-                    <h3 id="progress-title">Analyzing Dataset...</h3>
-                    <ul class="progress-steps" id="progress-steps">
-                        <li class="step-done"><i class="fa-solid fa-check text-green"></i> Dataset imported</li>
-                        <li class="step-active"><div class="spinner-small"></div> Schema detection</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Data quality analysis</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Missing values analysis</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Duplicates analysis</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Cleaning recommendations</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> Statistics & EDA</li>
-                        <li class="step-pending"><i class="fa-regular fa-circle"></i> KPIs & Dashboards</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
+        </aside>
 
         <!-- ==============================
-             VIEW 3: RESULTS APPLICATION SHELL
+             MAIN PAGE AREA
              ============================== -->
-        <div id="view-results-shell" class="view-section hidden results-layout">
-            <aside class="sidebar">
-                <div class="sidebar-section">
-                    <h4>OVERVIEW</h4>
-                    <a href="#" id="nav-dashboard" class="active" onclick="App.switchView('dashboard')"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+        <div class="notion-main">
+            <div class="notion-topbar">
+                <div class="breadcrumb" id="breadcrumb">
+                    <span class="breadcrumb-root">Automated Data Analyst</span>
+                    <span class="breadcrumb-sep">/</span>
+                    <span class="breadcrumb-current" id="breadcrumb-current">Home</span>
                 </div>
-                <div class="sidebar-section">
-                    <h4>DATA</h4>
-                    <a href="#" id="nav-quality" onclick="App.switchView('quality')"><i class="fa-solid fa-shield-heart"></i> Quality</a>
+                <div class="topbar-actions">
+                    <a class="topbar-link" href="/docs" target="_blank" rel="noopener">API</a>
+                    <span class="topbar-meta">Local workspace</span>
                 </div>
-                <div class="sidebar-section">
-                    <h4>ANALYSIS</h4>
-                    <a href="#" id="nav-statistics" onclick="App.switchView('statistics')"><i class="fa-solid fa-calculator"></i> Statistics</a>
-                    <a href="#" id="nav-eda" onclick="App.switchView('eda')"><i class="fa-solid fa-magnifying-glass-chart"></i> EDA</a>
-                </div>
-                <div class="sidebar-section">
-                    <h4>OUTPUT</h4>
-                    <a href="#" id="nav-reports" onclick="App.switchView('reports')"><i class="fa-solid fa-file-pdf"></i> Reports</a>
-                </div>
-            </aside>
-            <div class="main-content">
-                <div class="content-header">
-                    <h2 id="results-filename">Dataset Analysis</h2>
-                </div>
-                <div class="content-body" id="results-body">
-                    <div class="card result-card" id="view-panel-dashboard">
-                        <div class="bi-report-header">
-                            <div>
-                                <h3><i class="fa-solid fa-chart-line"></i> BI Dashboard</h3>
-                                <p id="bi-report-subtitle">Source-backed business performance overview</p>
+            </div>
+
+            <div class="notion-page" id="app-container">
+
+                <!-- ==============================
+                     VIEW 1: HOME (GET DATA)
+                     ============================== -->
+                <div id="view-home" class="view-section active">
+                    <header class="page-header">
+                        <div class="page-icon"><i class="fa-solid fa-chart-simple"></i></div>
+                        <h1>Automated Data Analyst</h1>
+                        <p class="page-subtitle">Upload business data. Get cleaned data, insights, KPIs, dashboards and reports automatically.</p>
+                    </header>
+
+                    <main>
+                        <!-- Get Data -->
+                        <section class="sources-section" id="sources-section">
+                            <div class="sources-header">
+                                <h2>Get Data</h2>
+                                <p>Connect to data from multiple sources to start building insights.</p>
                             </div>
-                            <div class="bi-report-downloads" id="bi-report-downloads"></div>
-                        </div>
-                        <section class="dashboard-design-studio hidden" id="dashboard-design-studio" aria-label="Dashboard design controls">
-                            <div class="dashboard-design-summary">
-                                <div class="dashboard-template-icon" id="dashboard-template-icon"><i class="fa-solid fa-chart-line"></i></div>
-                                <div>
-                                    <span class="dashboard-control-label">Dashboard design</span>
-                                    <strong id="dashboard-template-name">Executive overview</strong>
-                                    <p id="dashboard-template-description">A focused operating pulse for fast decisions.</p>
+
+                            <div class="connector-grid">
+                                <div class="connector-tile" onclick="document.getElementById('file-input-excel').click()">
+                                    <div class="connector-icon excel"><i class="fa-solid fa-file-excel"></i></div>
+                                    <div class="connector-info">
+                                        <h4>Excel Workbook</h4>
+                                        <p>.xlsx, .xls</p>
+                                    </div>
+                                    <input type="file" id="file-input-excel" accept=".xlsx,.xls" hidden onchange="App.handleFileUpload(this.files)">
                                 </div>
-                                <button type="button" class="btn btn-template" onclick="App.toggleDashboardTemplates()" aria-expanded="false" aria-controls="dashboard-template-gallery" id="dashboard-template-toggle">
-                                    <i class="fa-solid fa-swatchbook"></i> Templates
-                                </button>
+
+                                <div class="connector-tile" onclick="document.getElementById('file-input-csv').click()">
+                                    <div class="connector-icon csv"><i class="fa-solid fa-file-csv"></i></div>
+                                    <div class="connector-info">
+                                        <h4>Text / CSV</h4>
+                                        <p>.csv, .tsv, .txt</p>
+                                    </div>
+                                    <input type="file" id="file-input-csv" accept=".csv,.tsv,.txt" hidden onchange="App.handleFileUpload(this.files)">
+                                </div>
+
+                                <div class="connector-tile" onclick="document.getElementById('file-input-json').click()">
+                                    <div class="connector-icon json"><i class="fa-brands fa-js"></i></div>
+                                    <div class="connector-info">
+                                        <h4>JSON Data</h4>
+                                        <p>.json, .ndjson</p>
+                                    </div>
+                                    <input type="file" id="file-input-json" accept=".json,.jsonl,.ndjson" hidden onchange="App.handleFileUpload(this.files)">
+                                </div>
+
+                                <div class="connector-tile" onclick="document.getElementById('file-input-parquet').click()">
+                                    <div class="connector-icon parquet"><i class="fa-solid fa-database"></i></div>
+                                    <div class="connector-info">
+                                        <h4>Parquet</h4>
+                                        <p>.parquet</p>
+                                    </div>
+                                    <input type="file" id="file-input-parquet" accept=".parquet" hidden onchange="App.handleFileUpload(this.files)">
+                                </div>
+
+                                <div class="connector-tile" onclick="document.getElementById('file-input-sqlite').click()">
+                                    <div class="connector-icon sqlite"><i class="fa-solid fa-server"></i></div>
+                                    <div class="connector-info">
+                                        <h4>SQLite Database</h4>
+                                        <p>.sqlite, .db</p>
+                                    </div>
+                                    <input type="file" id="file-input-sqlite" accept=".sqlite,.db" hidden onchange="App.handleFileUpload(this.files)">
+                                </div>
+
+                                <div class="connector-tile dropzone-tile" id="drop-zone">
+                                    <div class="connector-icon generic"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                                    <div class="connector-info">
+                                        <h4>Drag &amp; Drop</h4>
+                                        <p>Drop any supported file here</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="dashboard-template-gallery hidden" id="dashboard-template-gallery" role="region" aria-label="Available dashboard templates">
-                                <div class="dashboard-template-list" id="dashboard-template-list"></div>
+
+                            <div class="upload-progress hidden" id="upload-progress">
+                                <div class="spinner"></div>
+                                <p id="upload-status-text">Uploading and inspecting dataset...</p>
                             </div>
                         </section>
-                        <div class="dashboard-filter-bar hidden" id="dashboard-filter-bar" aria-label="Dashboard filters"></div>
-                        <div class="bi-dashboard-grid" id="bi-dashboard-container">
-                            <!-- Template-positioned KPIs, charts, and tables are injected via app.js -->
-                        </div>
-                        <section class="bi-findings-section" id="bi-report-findings-section">
-                            <h3>Key findings</h3>
-                            <ul class="bi-findings-list" id="bi-report-findings"></ul>
+
+                        <!-- Excel Sheet Selection -->
+                        <section class="card excel-selection-section hidden" id="excel-selection-section">
+                            <h3><i class="fa-solid fa-file-excel"></i> Workbook detected</h3>
+                            <p id="excel-sheet-count">Select a sheet to analyze:</p>
+                            <div class="sheet-list" id="sheet-list">
+                                <!-- Populated by JS -->
+                            </div>
                         </section>
-                        <div class="bi-report-tables" id="bi-report-tables"></div>
-                        <p class="bi-report-status" id="bi-report-status">Generate a BI report to view metrics, charts, and export files.</p>
+
+                        <!-- Recent Datasets -->
+                        <section class="recent-datasets" id="recent-datasets-section">
+                            <h2>Recent datasets</h2>
+                            <div class="dataset-grid" id="recent-datasets-grid">
+                                <p class="empty-text">No datasets yet. Upload your first dataset above.</p>
+                            </div>
+                        </section>
+
+                        <!-- Portfolio project workbench -->
+                        <section class="card project-lab" id="project-lab">
+                            <div class="project-lab-header">
+                                <div>
+                                    <span class="block-label">Portfolio project workbench</span>
+                                    <h3>Build 3 flagship end-to-end projects</h3>
+                                    <p>Lead with Sales/Revenue, Customer, and Operations projects that cover raw data → cleaning → SQL → semantic model → analysis → dashboard → insights → recommendations. Seventeen smaller projects remain as focused skill drills.</p>
+                                </div>
+                                <button type="button" class="btn btn-primary" id="project-build-all" onclick="App.buildAllPortfolioProjects()"><i class="fa-solid fa-list-check"></i> Validate 3 flagships</button>
+                            </div>
+                            <div class="project-catalog-grid" id="project-catalog-grid">
+                                <p class="empty-text">Loading portfolio projects...</p>
+                            </div>
+                            <div id="project-validation-results" aria-live="polite"></div>
+                        </section>
+                    </main>
+                </div>
+
+                <!-- ==============================
+                     VIEW 2: DATASET OVERVIEW
+                     ============================== -->
+                <div id="view-dataset-overview" class="view-section hidden">
+                    <header class="page-header">
+                        <div class="page-icon"><i class="fa-solid fa-table"></i></div>
+                        <h1 id="overview-filename">Dataset</h1>
+                        <p class="version-badge">Current Version: V1</p>
+                    </header>
+
+                    <div class="overview-actions action-buttons">
+                        <button class="btn btn-outline" onclick="App.exploreManually()">
+                            <i class="fa-solid fa-sliders"></i> Explore Manually
+                        </button>
+                        <button class="btn btn-outline" onclick="App.generateBIReport()">
+                            <i class="fa-solid fa-chart-column"></i> Generate BI Report
+                        </button>
+                        <button class="btn btn-primary" onclick="App.runAutoAnalyst()">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Run Professional End-to-End
+                        </button>
                     </div>
 
-                    <div class="card result-card hidden" id="view-panel-quality">
-                        <div class="bi-report-header">
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <i class="fa-solid fa-list-ol"></i>
                             <div>
-                                <h3><i class="fa-solid fa-shield-heart"></i> Data Quality Analysis</h3>
-                                <p>Comprehensive assessment of missing values, outliers, and schema anomalies.</p>
-                            </div>
-                            <div>
-                                <button class="btn btn-primary" onclick="App.runQualityAnalysis()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                                <p>Rows</p>
+                                <h4 id="overview-rows">--</h4>
                             </div>
                         </div>
-                        <div id="quality-results-container" style="margin-top: 1rem;">
-                            <p class="empty-text">Click "Run Analysis" to generate the quality report.</p>
+                        <div class="stat-card">
+                            <i class="fa-solid fa-table-columns"></i>
+                            <div>
+                                <p>Columns</p>
+                                <h4 id="overview-cols">--</h4>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fa-solid fa-heart-pulse"></i>
+                            <div>
+                                <p>Health Score</p>
+                                <h4 id="overview-health">--</h4>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <div>
+                                <p>Missing</p>
+                                <h4 id="overview-missing">--</h4>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fa-solid fa-copy"></i>
+                            <div>
+                                <p>Duplicates</p>
+                                <h4 id="overview-duplicates">--</h4>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fa-solid fa-shield-halved"></i>
+                            <div>
+                                <p>Validation</p>
+                                <h4 id="overview-validation">Pending</h4>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="card result-card hidden" id="view-panel-statistics">
-                        <div class="bi-report-header">
-                            <div>
-                                <h3><i class="fa-solid fa-calculator"></i> Statistical Summary</h3>
-                                <p>Descriptive statistics and aggregations for all numeric columns.</p>
-                            </div>
-                            <div>
-                                <button class="btn btn-primary" onclick="App.runStatistics()"><i class="fa-solid fa-play"></i> Run Analysis</button>
-                            </div>
-                        </div>
-                        <div id="statistics-results-container" style="margin-top: 1rem;">
-                            <p class="empty-text">Click "Run Analysis" to generate the statistical summary.</p>
+                    <div class="card preview-card">
+                        <h3><i class="fa-solid fa-table"></i> Data Preview</h3>
+                        <div class="table-container">
+                            <table id="overview-preview-table">
+                                <thead><tr id="overview-preview-thead"></tr></thead>
+                                <tbody id="overview-preview-tbody"></tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <div class="card result-card hidden" id="view-panel-eda">
-                        <div class="bi-report-header">
-                            <div>
-                                <h3><i class="fa-solid fa-magnifying-glass-chart"></i> Exploratory Data Analysis (EDA)</h3>
-                                <p>Advanced correlations and distributional insights.</p>
-                            </div>
-                            <div>
-                                <button class="btn btn-primary" onclick="App.runEDA()"><i class="fa-solid fa-play"></i> Run Analysis</button>
-                            </div>
-                        </div>
-                        <div id="eda-results-container" style="margin-top: 1rem;">
-                            <p class="empty-text">Click "Run Analysis" to generate the EDA report.</p>
-                        </div>
-                    </div>
-
-                    <div class="card result-card hidden" id="view-panel-reports">
-                        <div class="bi-report-header">
-                            <div>
-                                <h3><i class="fa-solid fa-file-pdf"></i> Reports & Exports</h3>
-                                <p>Download generated artifacts.</p>
-                            </div>
-                        </div>
-                        <div id="reports-results-container" style="margin-top: 1rem; display:flex; gap:10px;">
-                            <p class="empty-text">Run the Automated Analysis first to enable exports.</p>
-                        </div>
-                    </div>
-                    <div class="card result-card" id="analysis-status-card">
-                        <h3>Analysis status</h3>
-                        <div class="metrics-grid" id="final-metrics-grid" style="margin-top:20px;">
-                            <!-- Analysis status injected via JS -->
+                    <!-- Automated Analysis Progress Modal -->
+                    <div class="progress-modal hidden" id="analysis-progress">
+                        <div class="progress-box">
+                            <h3 id="progress-title">Analyzing Dataset...</h3>
+                            <ul class="progress-steps" id="progress-steps">
+                                <li class="step-done"><i class="fa-solid fa-check text-green"></i> Dataset imported</li>
+                                <li class="step-active"><div class="spinner-small"></div> Schema, quality &amp; cleaning</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> SQL and relational analysis</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> Star schema &amp; date model</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> DAX measures &amp; time intelligence</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> Business evidence &amp; insights</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> Dashboard interactions &amp; UX</li>
+                                <li class="step-pending"><i class="fa-regular fa-circle"></i> Recommendations &amp; client exports</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
+
+                <!-- ==============================
+                     VIEW 2: WORKSPACE SETTINGS
+                     ============================== -->
+                <div id="view-settings" class="view-section hidden">
+                    <div class="main-content">
+                        <header class="page-header settings-page-header">
+                            <span class="product-kicker">WORKSPACE SETTINGS</span>
+                            <h1>Settings</h1>
+                            <p class="page-subtitle">Configure the local analyst workspace without leaving your data workflow.</p>
+                        </header>
+                        <div class="settings-layout">
+                            <section class="card settings-card">
+                                <div class="settings-card-heading">
+                                    <div class="settings-card-icon"><i class="fa-solid fa-sliders"></i></div>
+                                    <div><h3>Workspace defaults</h3><p>Choose how new BI reports should open and be presented.</p></div>
+                                </div>
+                                <div class="settings-form-grid">
+                                    <label>Default dashboard template
+                                        <select id="settings-dashboard-template" class="intelligence-select">
+                                            <option value="executive">Executive overview</option>
+                                            <option value="sales_performance">Sales performance</option>
+                                            <option value="ecommerce_conversion">E-commerce conversion</option>
+                                            <option value="operations">Operations pulse</option>
+                                            <option value="root_cause">Root-cause diagnostic</option>
+                                            <option value="powerbi_executive_sales">Power BI executive sales</option>
+                                            <option value="powerbi_ecommerce_conversion">Power BI e-commerce conversion</option>
+                                            <option value="powerbi_kpi_slicer">Power BI KPI slicer</option>
+                                        </select>
+                                        <small>Saved locally in this browser and applied to the next generated report.</small>
+                                    </label>
+                                </div>
+                                <div class="settings-actions">
+                                    <button class="btn btn-primary" type="button" onclick="App.saveSettings()"><i class="fa-solid fa-check"></i> Save settings</button>
+                                    <button class="btn" type="button" onclick="App.resetSettings()"><i class="fa-solid fa-rotate-left"></i> Reset defaults</button>
+                                    <span id="settings-save-status" class="settings-save-status" role="status"></span>
+                                </div>
+                            </section>
+
+                            <section class="card settings-card">
+                                <div class="settings-card-heading">
+                                    <div class="settings-card-icon"><i class="fa-solid fa-heart-pulse"></i></div>
+                                    <div><h3>Workspace status</h3><p>Confirm that the local API and analysis services are reachable.</p></div>
+                                </div>
+                                <div class="settings-status-grid">
+                                    <div><span>Frontend</span><strong class="status-chip success">Connected</strong></div>
+                                    <div><span>API</span><strong id="settings-api-status" class="status-chip warning">Checking...</strong></div>
+                                    <div><span>Runtime</span><strong id="settings-runtime-status" class="status-chip neutral">Local workspace</strong></div>
+                                </div>
+                                <button class="btn" type="button" onclick="App.refreshSettingsStatus()"><i class="fa-solid fa-rotate"></i> Check connection</button>
+                            </section>
+
+                            <section class="card settings-card settings-help-card">
+                                <div class="settings-card-heading">
+                                    <div class="settings-card-icon"><i class="fa-solid fa-circle-info"></i></div>
+                                    <div><h3>How this workspace works</h3><p>Use the sidebar to move from source data to governed delivery.</p></div>
+                                </div>
+                                <div class="settings-help-grid">
+                                    <div><strong>1. Get data</strong><span>Upload CSV, Excel, JSON, Parquet, or SQLite.</span></div>
+                                    <div><strong>2. Analyze</strong><span>Run quality, SQL, statistics, BI, ML, and geographic workflows.</span></div>
+                                    <div><strong>3. Deliver</strong><span>Export HTML, PDF, XLSX, Power BI PBIP, Tableau TWBX, or infographics.</span></div>
+                                </div>
+                                <a class="settings-doc-link" href="/docs" target="_blank" rel="noopener"><i class="fa-solid fa-book-open"></i> Open API documentation</a>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==============================
+                     VIEW 3: ANALYST WORKSPACE
+                     ============================== -->
+                <div id="view-results-shell" class="view-section hidden">
+                    <div class="main-content">
+                        <header class="page-header compact">
+                            <h1 id="results-filename">Dataset Analysis</h1>
+                        </header>
+                        <div class="content-body" id="results-body">
+                            <div class="card result-card dashboard-experience" id="view-panel-dashboard">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-chart-line"></i> BI Dashboard</h3>
+                                        <p id="bi-report-subtitle">Source-backed business performance overview</p>
+                                    </div>
+                                    <div class="bi-report-downloads" id="bi-report-downloads"></div>
+                                </div>
+                                <section class="dashboard-design-studio hidden" id="dashboard-design-studio" aria-label="Dashboard design controls">
+                                    <div class="dashboard-design-summary">
+                                        <div class="dashboard-template-icon" id="dashboard-template-icon"><i class="fa-solid fa-chart-line"></i></div>
+                                        <div>
+                                            <span class="block-label">Dashboard design</span>
+                                            <strong id="dashboard-template-name">Executive overview</strong>
+                                            <p id="dashboard-template-description">A focused operating pulse for fast decisions.</p>
+                                        </div>
+                                        <button type="button" class="btn btn-template" onclick="App.toggleDashboardTemplates()" aria-expanded="false" aria-controls="dashboard-template-gallery" id="dashboard-template-toggle">
+                                            <i class="fa-solid fa-swatchbook"></i> Templates
+                                        </button>
+                                    </div>
+                                    <div class="dashboard-template-gallery hidden" id="dashboard-template-gallery" role="region" aria-label="Available dashboard templates">
+                                        <div class="dashboard-template-list" id="dashboard-template-list"></div>
+                                    </div>
+                                </section>
+                                <div class="dashboard-filter-bar hidden" id="dashboard-filter-bar" aria-label="Dashboard filters"></div>
+                                <div class="bi-dashboard-grid" id="bi-dashboard-container">
+                                    <!-- Template-positioned KPIs, charts, and tables are injected via app.js -->
+                                </div>
+                                <section class="bi-findings-section" id="bi-report-findings-section">
+                                    <h3>Key findings</h3>
+                                    <ul class="bi-findings-list" id="bi-report-findings"></ul>
+                                </section>
+                                <section class="bi-model-explanation hidden" id="bi-model-explanation"></section>
+                                <div class="bi-report-tables" id="bi-report-tables"></div>
+                                <p class="bi-report-status" id="bi-report-status">Generate a BI report to view metrics, charts, and export files.</p>
+                            </div>
+
+                            <div class="card result-card hidden conversation-studio" id="view-panel-conversation">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <span class="product-kicker">PYTHON DATA INTELLIGENCE ENGINE</span>
+                                        <h3><i class="fa-solid fa-comments"></i> Ask Data</h3>
+                                        <p>Ask questions in plain language. Every answer shows the analysis plan, source columns, evidence, scope, and caveats.</p>
+                                    </div>
+                                    <button class="btn" type="button" onclick="App.clearConversation()"><i class="fa-solid fa-rotate-left"></i> New conversation</button>
+                                </div>
+                                <div class="conversation-layout">
+                                    <div class="conversation-chat-shell">
+                                        <div id="conversation-messages" class="conversation-messages">
+                                            <article class="conversation-message assistant"><span class="conversation-message-role">Data Intelligence</span><p>Ask a question about the selected dataset. I will show the answer, evidence, execution plan, and caveats.</p></article>
+                                        </div>
+                                        <div class="conversation-quick-prompts">
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('What is total revenue?')">Total revenue</button>
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('Why did revenue change?')">Why did revenue change?</button>
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('Show the top products by sales.')">Top products</button>
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('Is this data healthy?')">Data health</button>
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('Forecast the next 3 months of revenue.')">Forecast</button>
+                                            <button class="conversation-chip" onclick="App.useConversationPrompt('Make this dataset BI-ready for Power BI.')">Make BI-ready</button>
+                                        </div>
+                                        <div class="conversation-input-row">
+                                            <textarea id="conversation-input" class="intelligence-input" rows="3" placeholder="Ask about the selected dataset..." onkeydown="if(event.key === 'Enter' && (event.ctrlKey || event.metaKey)){event.preventDefault();App.askConversational();}"></textarea>
+                                            <button class="btn btn-primary" type="button" onclick="App.askConversational()"><i class="fa-solid fa-paper-plane"></i> Ask</button>
+                                        </div>
+                                        <small class="conversation-hint">Ctrl/⌘ + Enter to ask · Read-only, bounded Python execution · No unsupported causal claims</small>
+                                    </div>
+                                    <div id="conversation-analysis-result" class="conversation-analysis-result">
+                                        <p class="empty-text">Your evidence and execution details will appear here.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden" id="view-panel-quality">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-shield-heart"></i> Data Quality Analysis</h3>
+                                        <p>Comprehensive assessment of missing values, outliers, and schema anomalies.</p>
+                                    </div>
+                                    <div>
+                                        <div class="quality-actions">
+                                            <button class="btn" onclick="App.runQualityAnalysis()"><i class="fa-solid fa-play"></i> Diagnose health</button>
+                                            <button class="btn btn-primary" onclick="App.buildHealthPlan()"><i class="fa-solid fa-wand-magic-sparkles"></i> Improve data health</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="quality-results-container" style="margin-top: 1rem;">
+                                    <p class="empty-text">Diagnose the dataset first, then build a safe improvement plan with preview and approval.</p>
+                                </div>
+                                <div id="health-plan-container" class="health-plan-container">
+                                    <p class="empty-text">The proposed recipe will never change the dataset until you approve Apply.</p>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-bi-readiness">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <span class="product-kicker">GOVERNED BI HANDOFF</span>
+                                        <h3><i class="fa-solid fa-layer-group"></i> BI-ready data</h3>
+                                        <p>Turn the selected dataset into a clean, modeled handoff for Power BI, Tableau, or the built-in report generator. Preview first; Apply creates a new immutable version.</p>
+                                    </div>
+                                    <div class="quality-actions">
+                                        <button class="btn" type="button" onclick="App.profileBIReadiness()"><i class="fa-solid fa-stethoscope"></i> Profile</button>
+                                        <button class="btn" type="button" onclick="App.previewBIReadiness()"><i class="fa-solid fa-eye"></i> Preview</button>
+                                        <button class="btn btn-primary" type="button" onclick="App.applyBIReadiness()"><i class="fa-solid fa-check"></i> Create BI-ready version</button>
+                                    </div>
+                                </div>
+                                <div id="bi-readiness-results" class="bi-readiness-results">
+                                    <p class="empty-text">Profile the selected dataset to see recommended BI transformations, fact grain, dimensions, measures, and blockers.</p>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden" id="view-panel-statistics">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-calculator"></i> Statistical Summary</h3>
+                                        <p>Descriptive statistics and aggregations for all numeric columns.</p>
+                                    </div>
+                                    <div>
+                                        <button class="btn btn-primary" onclick="App.runStatistics()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                                    </div>
+                                </div>
+                                <div id="statistics-results-container" style="margin-top: 1rem;">
+                                    <p class="empty-text">Click "Run Analysis" to generate the statistical summary.</p>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden" id="view-panel-sql">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-code"></i> SQL Lab</h3>
+                                        <p>Run bounded read-only SQL against the current dataset table. CTEs, subqueries, windows, CASE, dates, ranking, and running totals are supported.</p>
+                                    </div>
+                                    <button class="btn btn-primary" onclick="App.runSQLQuery()"><i class="fa-solid fa-play"></i> Run query</button>
+                                </div>
+                                <textarea id="sql-query-editor" class="sql-query-editor" spellcheck="false">WITH ranked AS (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY 1) AS row_rank
+    FROM dataset
+)
+SELECT * FROM ranked LIMIT 50;</textarea>
+                                <div id="sql-query-results" style="margin-top:1rem;"><p class="empty-text">Use table name <code>dataset</code>, then run a read-only query.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden" id="view-panel-eda">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-magnifying-glass-chart"></i> Exploratory Data Analysis (EDA)</h3>
+                                        <p>Advanced correlations and distributional insights.</p>
+                                    </div>
+                                    <div>
+                                        <button class="btn btn-primary" onclick="App.runEDA()"><i class="fa-solid fa-play"></i> Run Analysis</button>
+                                    </div>
+                                </div>
+                                <div id="eda-results-container" style="margin-top: 1rem;">
+                                    <p class="empty-text">Click "Run Analysis" to generate the EDA report.</p>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-forecast">
+                                <div class="bi-report-header">
+                                    <div><h3><i class="fa-solid fa-chart-line"></i> Forecast Studio</h3><p>Readiness, diagnostics, backtesting, model selection, intervals, and planning from one governed workflow.</p></div>
+                                    <button class="btn btn-primary" onclick="App.runForecast()"><i class="fa-solid fa-play"></i> Generate forecast</button>
+                                </div>
+                                <div class="intelligence-form-grid">
+                                    <label>Date column<select id="forecast-date-column" class="intelligence-select"></select></label>
+                                    <label>Value column<select id="forecast-value-column" class="intelligence-select"></select></label>
+                                    <label>Model<select id="forecast-model" class="intelligence-select"><option value="auto">Automatic selection</option><option value="holt">Holt trend</option><option value="holt_winters">Holt-Winters</option><option value="arima">ARIMA</option><option value="sarima">SARIMA</option><option value="naive">Naive baseline</option></select></label>
+                                    <label>Horizon<input id="forecast-horizon" class="intelligence-input" type="number" min="1" max="1000" value="12"></label>
+                                    <label>Seasonal period<input id="forecast-seasonal-period" class="intelligence-input" type="number" min="2" placeholder="Auto"></label>
+                                    <label>Frequency<input id="forecast-frequency" class="intelligence-input" type="text" placeholder="Auto / D / W / ME"></label>
+                                </div>
+                                <div class="intelligence-actions"><button class="btn" onclick="App.runForecastReadiness()">Check readiness</button><button class="btn" onclick="App.runForecastDiagnostics()">Trend &amp; seasonality</button></div>
+                                <div id="forecast-results" class="intelligence-results"><p class="empty-text">Choose a date and value column, then check readiness or generate a forecast.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-machine-learning">
+                                <div class="bi-report-header">
+                                    <div><h3><i class="fa-solid fa-brain"></i> Machine Learning Studio</h3><p>Leakage-safe preparation, bounded AutoML, tuning, explainability, uncertainty, and model registration.</p></div>
+                                </div>
+                                <div class="intelligence-form-grid">
+                                    <label>Target column<select id="ml-target-column" class="intelligence-select"></select></label>
+                                    <label>Feature columns<input id="ml-feature-columns" class="intelligence-input" type="text" placeholder="Comma-separated; blank uses all non-target columns"></label>
+                                    <label>Task<select id="ml-task-type" class="intelligence-select"><option value="auto">Detect automatically</option><option value="classification">Classification</option><option value="regression">Regression</option></select></label>
+                                    <label>Algorithm<select id="ml-algorithm" class="intelligence-select"><option value="logistic_regression">Logistic regression</option><option value="random_forest_classifier">Random forest classifier</option><option value="gradient_boosting_classifier">Gradient boosting classifier</option><option value="ridge_regression">Ridge regression</option><option value="random_forest_regressor">Random forest regressor</option><option value="gradient_boosting_regressor">Gradient boosting regressor</option></select></label>
+                                    <label>Model name<input id="ml-model-name" class="intelligence-input" type="text" placeholder="Client-ready model name"></label>
+                                </div>
+                                <div class="intelligence-actions"><button class="btn" onclick="App.runMLAction('readiness')">Check readiness</button><button class="btn btn-primary" onclick="App.runMLAction('train')">Train &amp; register</button><button class="btn" onclick="App.runMLAction('compare')">Compare candidates</button><button class="btn" onclick="App.runUnsupervised()">Find clusters</button></div>
+                                <div id="ml-results" class="intelligence-results"><p class="empty-text">Select a target for supervised learning, or run clustering without one.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden geographic-studio" id="view-panel-geographic">
+                                <div class="bi-report-header geographic-header">
+                                    <div>
+                                        <span class="product-kicker">GEOGRAPHIC INTELLIGENCE</span>
+                                        <h3><i class="fa-solid fa-earth-asia"></i> Maps &amp; Geospatial Studio</h3>
+                                        <p>Detect geography, resolve place names, build interactive maps, analyze locations, and save reusable map definitions.</p>
+                                    </div>
+                                    <div class="geographic-header-actions">
+                                        <button class="btn" onclick="App.runGeographicEDA()"><i class="fa-solid fa-magnifying-glass-chart"></i> Profile</button>
+                                        <button class="btn btn-primary" onclick="App.generateGeographicMap()"><i class="fa-solid fa-map"></i> Generate map</button>
+                                    </div>
+                                </div>
+                                <div class="geographic-tabs" role="tablist" aria-label="Geographic Intelligence sections">
+                                    <button class="active" data-geo-tab="quick" onclick="App.switchGeographicTab('quick')">Quick Map</button>
+                                    <button data-geo-tab="studio" onclick="App.switchGeographicTab('studio')">Map Studio</button>
+                                    <button data-geo-tab="eda" onclick="App.switchGeographicTab('eda')">Geographic EDA</button>
+                                    <button data-geo-tab="territory" onclick="App.switchGeographicTab('territory')">Territory Builder</button>
+                                    <button data-geo-tab="location" onclick="App.switchGeographicTab('location')">Location Analytics</button>
+                                    <button data-geo-tab="templates" onclick="App.switchGeographicTab('templates')">Map Templates</button>
+                                    <button data-geo-tab="saved" onclick="App.switchGeographicTab('saved')">Saved Maps</button>
+                                </div>
+
+                                <div class="geographic-workbench" data-geo-panel="quick">
+                                    <aside class="geographic-controls">
+                                        <div class="geographic-control-section">
+                                            <h4>Data</h4>
+                                            <label>Map type<select id="geo-map-type" class="intelligence-select"><option value="auto">Recommend automatically</option><option value="choropleth">Choropleth</option><option value="categorical_region">Categorical region</option><option value="point">Point map</option><option value="bubble">Bubble map</option><option value="heatmap">Heatmap</option><option value="cluster">Cluster map</option></select></label>
+                                            <label>Geography field<select id="geo-geography-column" class="intelligence-select"><option value="">Auto-detect</option></select></label>
+                                            <label>Metric<select id="geo-measure-column" class="intelligence-select"><option value="">Count rows</option></select></label>
+                                            <label>Aggregation<select id="geo-aggregation" class="intelligence-select"><option value="sum">Sum</option><option value="average">Average</option><option value="median">Median</option><option value="count">Count</option><option value="distinct_count">Distinct count</option><option value="minimum">Minimum</option><option value="maximum">Maximum</option></select></label>
+                                            <label>Category<select id="geo-category-column" class="intelligence-select"><option value="">Not specified</option></select></label>
+                                            <label>Latitude<select id="geo-latitude-column" class="intelligence-select"><option value="">Auto-detect</option></select></label>
+                                            <label>Longitude<select id="geo-longitude-column" class="intelligence-select"><option value="">Auto-detect</option></select></label>
+                                            <label>Boundary<select id="geo-boundary" class="intelligence-select"><option value="">No boundary selected</option></select></label>
+                                            <label>Boundary name property<input id="geo-boundary-property" class="intelligence-input" placeholder="Auto-match"></label>
+                                            <div class="geographic-boundary-actions"><button class="btn btn-secondary btn-small" type="button" onclick="App.bootstrapWorldBoundary()"><i class="fa-solid fa-earth-americas"></i> Install global countries</button><button class="btn btn-primary btn-small" type="button" onclick="App.bootstrapIndiaBoundary()"><i class="fa-solid fa-landmark"></i> Import official India map</button><button class="btn btn-secondary btn-small" type="button" onclick="App.openOfficialIndiaBoundarySource()"><i class="fa-solid fa-arrow-up-right-from-square"></i> Survey of India source</button></div>
+                                        </div>
+                                        <div class="geographic-control-section compact">
+                                            <h4>Publish</h4>
+                                            <label>Title<input id="geo-title" class="intelligence-input" placeholder="Regional performance"></label>
+                                            <label>Tooltip fields<input id="geo-tooltip-fields" class="intelligence-input" placeholder="City, Customer, Product"></label>
+                                        </div>
+                                    </aside>
+                                    <div class="geographic-canvas-shell">
+                                        <div class="geographic-canvas-toolbar">
+                                            <div id="geo-map-status"><span class="status-dot"></span> Select fields or use automatic recommendations</div>
+                                            <button class="btn btn-outline" onclick="App.saveGeographicMap()"><i class="fa-solid fa-bookmark"></i> Save map</button>
+                                        </div>
+                                        <div id="geographic-map" class="geographic-map"><div class="map-empty"><i class="fa-solid fa-map-location-dot"></i><strong>Your map will appear here</strong><span>Generate a map from the selected dataset.</span></div></div>
+                                        <div id="geographic-map-evidence" class="geographic-map-evidence"></div>
+                                    </div>
+                                </div>
+
+                                <div class="geographic-workbench hidden" data-geo-panel="studio">
+                                    <aside class="geographic-controls studio-controls">
+                                        <div class="geographic-control-section">
+                                            <h4>Style</h4>
+                                            <label>Palette<select id="geo-palette" class="intelligence-select"><option value="blue">Blue</option><option value="teal">Teal</option><option value="sunset">Sunset</option><option value="purple">Purple</option></select></label>
+                                            <label class="inline-toggle"><input id="geo-reverse-palette" type="checkbox"> Reverse palette</label>
+                                            <label>Classification<select id="geo-classification" class="intelligence-select"><option value="quantile">Quantile</option><option value="equal_interval">Equal interval</option><option value="natural_breaks">Natural breaks (Jenks)</option><option value="custom">Custom breaks</option></select></label>
+                                            <label>Classes<input id="geo-classes" class="intelligence-input" type="number" min="2" max="7" value="5"></label>
+                                            <label>Custom breaks<input id="geo-custom-breaks" class="intelligence-input" placeholder="0, 100, 500, 1000"></label>
+                                            <label>Minimum<input id="geo-minimum" class="intelligence-input" type="number" placeholder="Automatic"></label>
+                                            <label>Maximum<input id="geo-maximum" class="intelligence-input" type="number" placeholder="Automatic"></label>
+                                            <label>Opacity<input id="geo-opacity" class="intelligence-input" type="range" min="0.1" max="1" step="0.05" value="0.82"></label>
+                                            <label>Border width<input id="geo-border-width" class="intelligence-input" type="number" min="0" max="5" step="0.5" value="1"></label>
+                                            <label>Bubble / heat radius<input id="geo-radius" class="intelligence-input" type="number" min="4" max="60" value="18"></label>
+                                            <label>Missing value color<input id="geo-missing-color" class="intelligence-input" type="color" value="#d1d5db"></label>
+                                            <label>Zero value color<input id="geo-zero-color" class="intelligence-input" type="color" value="#f3f4f6"></label>
+                                        </div>
+                                        <div class="geographic-control-section compact">
+                                            <h4>Labels</h4>
+                                            <label>Prefix<input id="geo-prefix" class="intelligence-input" placeholder="$ / ₹"></label>
+                                            <label>Suffix<input id="geo-suffix" class="intelligence-input" placeholder="% / km"></label>
+                                        </div>
+                                    </aside>
+                                    <div class="geographic-studio-summary">
+                                        <i class="fa-solid fa-sliders"></i><h4>Map Studio controls</h4><p>Style changes are applied on the next map generation. The renderer supports continuous region classes, category colors, missing/zero styling, variable bubbles, heat intensity, point clusters, hover evidence, pan, zoom, reset and fullscreen.</p>
+                                        <button class="btn btn-primary" onclick="App.generateGeographicMap()">Apply style &amp; regenerate</button>
+                                    </div>
+                                </div>
+
+                                <div class="geographic-insight-panel hidden" data-geo-panel="eda">
+                                    <div class="geographic-panel-heading"><div><h4>Geographic EDA</h4><p>Confidence, evidence, country context, missingness and coordinate validity.</p></div><button class="btn btn-primary" onclick="App.runGeographicEDA()">Run geographic profile</button></div>
+                                    <div id="geographic-eda-results" class="intelligence-results"><p class="empty-text">Run the profile to inspect detected geographic semantics.</p></div>
+                                </div>
+
+                                <div class="geographic-insight-panel hidden" data-geo-panel="territory">
+                                    <div class="geographic-panel-heading"><div><h4>Territory Builder</h4><p>Combine selected registered boundary features into a custom business territory.</p></div><button class="btn btn-primary" onclick="App.buildTerritory()">Build territory</button></div>
+                                    <div class="intelligence-form-grid"><label>Boundary<select id="geo-territory-boundary" class="intelligence-select"><option value="">Select boundary</option></select></label><label>Boundary property<input id="geo-territory-property" class="intelligence-input" placeholder="name"></label><label class="wide-field">Feature values<input id="geo-territory-values" class="intelligence-input" placeholder="North, East, Central"></label></div>
+                                    <div id="geographic-territory-results" class="intelligence-results"><p class="empty-text">Select a boundary and the regions that belong to the territory.</p></div>
+                                </div>
+
+                                <div class="geographic-insight-panel hidden" data-geo-panel="location">
+                                    <div class="geographic-panel-heading"><div><h4>Location Analytics</h4><p>Validate coordinates, calculate bounds and measure spread around the geographic centroid.</p></div><button class="btn btn-primary" onclick="App.runLocationAnalytics()">Analyze locations</button></div>
+                                    <div id="geographic-location-results" class="intelligence-results"><p class="empty-text">Latitude and longitude fields are required.</p></div>
+                                </div>
+
+                                <div class="geographic-insight-panel hidden" data-geo-panel="templates">
+                                    <div class="geographic-panel-heading"><div><h4>Map Templates</h4><p>Start with a governed configuration, then adapt it to the dataset.</p></div></div>
+                                    <div id="geographic-template-results" class="geographic-template-grid"></div>
+                                </div>
+
+                                <div class="geographic-insight-panel hidden" data-geo-panel="saved">
+                                    <div class="geographic-panel-heading"><div><h4>Saved Maps</h4><p>Reusable, versioned map definitions stored in the existing workspace registry.</p></div><button class="btn" onclick="App.loadSavedMaps()">Refresh</button></div>
+                                    <div id="geographic-saved-results" class="intelligence-results"><p class="empty-text">No saved maps loaded.</p></div>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-models">
+                                <div class="bi-report-header"><div><h3><i class="fa-solid fa-cubes"></i> Model Registry</h3><p>Immutable versions, training lineage, metrics, artifact checksums, and approval status.</p></div><button class="btn btn-primary" onclick="App.loadModels()"><i class="fa-solid fa-rotate"></i> Refresh</button></div>
+                                <div id="models-results" class="intelligence-results"><p class="empty-text">Refresh to inspect registered models and versions.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-monitoring">
+                                <div class="bi-report-header"><div><h3><i class="fa-solid fa-heart-pulse"></i> Model Monitoring</h3><p>Schema, feature, prediction, performance, calibration, uncertainty, and root-cause checks.</p></div><button class="btn btn-primary" onclick="App.runMonitoring()"><i class="fa-solid fa-play"></i> Run monitor</button></div>
+                                <div class="intelligence-form-grid">
+                                    <label>Model version<select id="monitor-model-version" class="intelligence-select"></select></label>
+                                    <label>Monitor<select id="monitor-operation" class="intelligence-select"><option value="feature_drift">Feature drift</option><option value="schema_compatibility">Schema compatibility</option><option value="missingness_drift">Missingness drift</option><option value="performance_drift">Performance drift</option><option value="calibration_drift">Calibration drift</option><option value="production_readiness">Production readiness</option></select></label>
+                                </div>
+                                <div id="monitoring-results" class="intelligence-results"><p class="empty-text">Select a registered model version to compare its training reference with the current dataset.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-data-engineering">
+                                <div class="bi-report-header"><div><h3><i class="fa-solid fa-diagram-project"></i> Data Engineering</h3><p>Contracts, schema evolution, CDC, dependencies, storage, freshness, replay, observability, and cost plans.</p></div><button class="btn btn-primary" onclick="App.runDataEngineering()"><i class="fa-solid fa-play"></i> Analyze</button></div>
+                                <div class="intelligence-form-grid">
+                                    <label>Capability<select id="de-operation" class="intelligence-select"><option value="source_readiness">Source readiness</option><option value="contract_schema_evolution">Contract &amp; schema evolution</option><option value="incremental_cdc">Incremental load / CDC</option><option value="partition_storage">Partition &amp; storage strategy</option><option value="freshness_sla">Freshness SLA</option><option value="cost_optimization">Warehouse/lake cost</option><option value="orchestration">Full engineering plan</option></select></label>
+                                    <label>Primary key columns<input id="de-primary-key" class="intelligence-input" type="text" placeholder="Comma-separated"></label>
+                                    <label>Timestamp column<select id="de-timestamp-column" class="intelligence-select"><option value="">Auto</option></select></label>
+                                    <label>SLA minutes<input id="de-sla-minutes" class="intelligence-input" type="number" min="1" value="1440"></label>
+                                </div>
+                                <div id="data-engineering-results" class="intelligence-results"><p class="empty-text">Select a capability to generate an evidence-backed engineering recommendation.</p></div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-automation">
+                                <div class="bi-report-header"><div><span class="product-kicker">STAFF BI CONTROL CENTER</span><h3><i class="fa-solid fa-route"></i> Automatic or Manual Workflow</h3><p>Run a governed end-to-end workflow, or control every stage yourself with explicit evidence and approval gates.</p></div><div class="intelligence-actions"><button class="btn" onclick="App.loadStaffControlCenter()"><i class="fa-solid fa-rotate"></i> Refresh capability evidence</button><button class="btn btn-primary" onclick="App.buildStaffPlan()"><i class="fa-solid fa-list-check"></i> Build staff plan</button></div></div>
+                                <div class="staff-control-card">
+                                    <div class="intelligence-form-grid">
+                                        <label>Operating mode<select id="staff-mode" class="intelligence-select"><option value="automatic">Automatic workflow — platform sequences safe checks</option><option value="manual">Manual workflow — I control each stage</option></select></label>
+                                        <label class="wide-field">Business objective<input id="staff-objective" class="intelligence-input" type="text" value="Build a trusted, decision-ready data product from this dataset"></label>
+                                    </div>
+                                    <div class="staff-stage-heading"><strong>Workflow stages</strong><span>Select the stages to include. Automatic execution remains read-only until approval.</span></div>
+                                    <div id="staff-stage-checklist" class="staff-stage-checklist"><span class="empty-text">Loading staff workflow stages...</span></div>
+                                    <div id="staff-capability-summary" class="staff-capability-summary"></div>
+                                    <div id="staff-control-results" class="intelligence-results"><p class="empty-text">Build a plan to see automatic actions, manual controls, evidence, and approval gates.</p></div>
+                                </div>
+                                <details class="staff-advanced-planner"><summary>Advanced orchestrator controls</summary>
+                                    <div class="bi-report-header"><div><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Dataset Orchestrator</h3><p>Coordinates analysis, forecasting, ML, governance, monitoring, and data engineering.</p></div><button class="btn btn-primary" onclick="App.runOrchestration()"><i class="fa-solid fa-play"></i> Run orchestrator</button></div>
+                                <div class="intelligence-form-grid">
+                                    <label class="wide-field">Business objective<input id="orchestration-objective" class="intelligence-input" type="text" value="Build a trusted, decision-ready data product from this dataset"></label>
+                                    <label>Target column<select id="orchestration-target" class="intelligence-select"><option value="">Not specified</option></select></label>
+                                    <label>Date column<select id="orchestration-date" class="intelligence-select"><option value="">Not specified</option></select></label>
+                                    <label>Value column<select id="orchestration-value" class="intelligence-select"><option value="">Not specified</option></select></label>
+                                </div>
+                                <div id="automation-results" class="intelligence-results"><p class="empty-text">The planner executes safe read-only checks and leaves deployment or destructive replay behind explicit approval gates.</p></div>
+                                </details>
+                            </div>
+
+                            <div class="card result-card hidden" id="view-panel-reports">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-file-arrow-down"></i> Reports &amp; Exports</h3>
+                                        <p>Download generated artifacts.</p>
+                                    </div>
+                                </div>
+                                <div id="reports-results-container" style="margin-top: 1rem; display:flex; gap:10px; flex-wrap: wrap;">
+                                    <p class="empty-text">Run the Automated Analysis first to enable exports.</p>
+                                </div>
+                            </div>
+
+                            <div class="card result-card hidden intelligence-studio" id="view-panel-infographics">
+                                <div class="bi-report-header">
+                                    <div>
+                                        <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Infographics Maker</h3>
+                                        <p>Turn a dataset or a pasted table into a clear, source-labelled PNG for X/Twitter, Instagram, or a newsletter.</p>
+                                    </div>
+                                    <button class="btn btn-primary" onclick="App.generateInfographic()"><i class="fa-solid fa-image"></i> Generate PNG</button>
+                                </div>
+                                <div class="infographic-layout">
+                                    <div class="intelligence-form-grid">
+                                        <label>Data source<select id="infographic-source-mode" class="intelligence-select"><option value="dataset">Selected dataset</option><option value="paste">Paste table</option></select></label>
+                                        <label>Story type<select id="infographic-panel-type" class="intelligence-select"><option value="">Auto-select best chart</option><option value="stat_headline">Headline stat</option><option value="ranked_bars">Ranked bars</option><option value="trend_line">Trend line</option><option value="share_breakdown">Share breakdown</option><option value="comparison">Comparison</option><option value="india_map_story">India Map Story</option><option value="world_map_story">Global Country Map Story</option></select></label>
+                                        <label>Canvas<select id="infographic-format" class="intelligence-select"><option value="square">Square — X feed safe</option><option value="landscape">Landscape — X / link preview</option><option value="portrait">Portrait — long ranking</option><option value="story">Story — vertical</option></select></label>
+                                        <label>Theme<select id="infographic-theme" class="intelligence-select"><option value="midnight">Midnight</option><option value="slate">Slate</option><option value="paper">Paper</option><option value="mono">Mono</option><option value="india_pixels">India Pixels</option></select></label>
+                                        <label>Category<select id="infographic-category-column" class="intelligence-select"><option value="">Auto-select</option></select></label>
+                                        <label>Measure<select id="infographic-measure-column" class="intelligence-select"><option value="">Auto-select</option></select></label>
+                                        <label>Date<select id="infographic-date-column" class="intelligence-select"><option value="">Auto-select</option></select></label>
+                                        <label>Aggregation<select id="infographic-aggregation" class="intelligence-select"><option value="sum">Sum</option><option value="mean">Average</option><option value="median">Median</option><option value="max">Maximum</option><option value="min">Minimum</option></select></label>
+                                        <label class="wide-field">Headline<input id="infographic-title" class="intelligence-input" type="text" placeholder="e.g. Where flight delays are building"></label>
+                                        <label class="wide-field">Context / source<input id="infographic-source" class="intelligence-input" type="text" placeholder="e.g. Source: U.S. DOT BTS, May 2026"></label>
+                                        <label>Account handle<input id="infographic-handle" class="intelligence-input" type="text" placeholder="@yourhandle"></label>
+                                        <label>Value prefix / suffix<input id="infographic-suffix" class="intelligence-input" type="text" placeholder="e.g. % or min"></label>
+                                    </div>
+                                    <div id="infographic-map-story-fields" class="infographic-map-story-fields hidden">
+                                        <div class="infographic-map-story-heading"><strong>Map Story</strong><span>Country or state editorial map with labels, legend, source and handle.</span></div>
+                                        <div class="intelligence-form-grid">
+                                            <label>Registered boundary<select id="infographic-boundary" class="intelligence-select"><option value="">Select a registered map boundary</option></select><button class="btn btn-primary btn-small" type="button" onclick="App.bootstrapIndiaBoundary()"><i class="fa-solid fa-landmark"></i> Import official India map</button><button class="btn btn-secondary btn-small" type="button" onclick="App.openOfficialIndiaBoundarySource()"><i class="fa-solid fa-arrow-up-right-from-square"></i> Survey of India source</button></label>
+                                            <label>Boundary name property<input id="infographic-boundary-property" class="intelligence-input" placeholder="Auto-match, e.g. name"></label>
+                                            <label>Map palette<select id="infographic-map-palette" class="intelligence-select"><option value="blue">Blue editorial</option><option value="teal">Teal</option><option value="sunset">Sunset</option><option value="purple">Purple</option></select></label>
+                                            <label>Classification<select id="infographic-map-classification" class="intelligence-select"><option value="quantile">Quantile</option><option value="equal_interval">Equal interval</option><option value="natural_breaks">Natural breaks</option><option value="custom">Custom</option></select></label>
+                                            <label>Classes<input id="infographic-map-classes" class="intelligence-input" type="number" min="2" max="7" value="5"></label>
+                                            <label class="inline-toggle"><input id="infographic-show-labels" type="checkbox" checked> Show region labels and values</label>
+                                        </div>
+                                        <small>India Map Story uses only an IN state/UT boundary. Import the official Survey of India GeoJSON for publishing; international WLD boundaries are rejected.</small>
+                                    </div>
+                                    <label class="infographic-paste-field">Paste CSV or tab-separated data<textarea id="infographic-paste-data" class="intelligence-input" rows="10" placeholder="Month,Flights&#10;2026-01,120&#10;2026-02,145&#10;2026-03,132"></textarea><small>Use this when the creator has a small table instead of an uploaded dataset.</small></label>
+                                </div>
+                                <div id="infographic-results" class="intelligence-results"><p class="empty-text">Choose a dataset or paste a table, then create a social-ready data story. Every graphic carries the source you provide.</p></div>
+                            </div>
+
+                            <div class="card result-card" id="analysis-status-card">
+                                <h3>Analysis status</h3>
+                                <div class="metrics-grid" id="final-metrics-grid" style="margin-top:20px;">
+                                    <!-- Analysis status injected via JS -->
+                                </div>
+                            </div>
+                            <div class="card result-card hidden" id="business-decision-card">
+                                <h3><i class="fa-solid fa-lightbulb"></i> Decision Brief</h3>
+                                <p>Problem → analysis → evidence → insight → recommendation</p>
+                                <div id="business-decision-content" style="margin-top:20px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -395,6 +824,7 @@
     <!-- Notification Toast -->
     <div id="toast" class="toast"></div>
 
+    <script async src="https://unpkg.com/maplibre-gl@5.12.0/dist/maplibre-gl.js" onload="window.dispatchEvent(new Event('maplibre-ready'))"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

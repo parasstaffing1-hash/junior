@@ -2,7 +2,10 @@
 .venv/
 venv/
 *.db
+*.duckdb
+*.sqlite
 uvicorn.*.log
+*.log
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -14,3 +17,23 @@ storage/
 !app/storage/dataset_storage.py
 storage/temp/
 storage/**/*.part
+
+# Local test/runtime sandboxes and tool metadata
+.codex-test-runtime*/
+.core-health-test-tmp/
+.full-*/
+.t/
+.claude/
+.h/
+
+# Local/generated reports and release output
+/analysis_result.json
+/bi_report.json
+/import_result.json
+/preview-*.log
+/artifacts/
+/dist/
+
+# Local input data used for manual testing
+/enterprise_retail_sales.csv
+/examples/geographic_studio_demo.csv

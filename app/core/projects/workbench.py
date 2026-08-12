@@ -22,7 +22,15 @@ from app.core.reporting.xlsx_generator import build_xlsx_bytes
 from app.core.visualization.bar_chart import build_bar_chart
 from app.core.visualization.line_chart import build_line_chart
 
+from .advanced_analytics import run_advanced_analysis
 from .catalog import ProjectSpec, get_project_spec
+
+
+_ADVANCED_SECTION_TITLES = {
+    "two_proportion_z_test": "Experiment result and significance",
+    "time_series_forecast": "Forecast and uncertainty",
+    "supervised_classification": "Model performance and drivers",
+}
 
 
 class ProjectBuildError(ValueError):
@@ -278,21 +286,23 @@ def _measure_column(fields: dict[str, str], frame: pd.DataFrame) -> tuple[str, s
 def _kpis(spec: ProjectSpec, frame: pd.DataFrame, fields: dict[str, str]) -> list[dict[str, Any]]:
     measure, label = _measure_column(fields, frame)
     values = _numeric(frame, measure).dropna()
+    # Definitions travel with each KPI so the Power BI and Tableau exports can
+    # regenerate the same number as a real measure instead of dropping it.
     kpis: list[dict[str, Any]] = [
-        {"label": "Rows analyzed", "value": int(len(frame)), "formatted_value": _format(len(frame)), "source_ref": "kpi:project:rows"},
-        {"label": f"Total {label.lower()}", "value": float(values.sum()), "formatted_value": _format(values.sum(), currency=label in {"Sales", "Revenue", "Profit", "Amount", "Monetary value", "Loan amount", "Monthly income"}), "source_ref": "kpi:project:total"},
-        {"label": f"Average {label.lower()}", "value": float(values.mean()), "formatted_value": _format(values.mean(), currency=label in {"Sales", "Revenue", "Profit", "Amount", "Monetary value", "Loan amount", "Monthly income"}), "source_ref": "kpi:project:average"},
+        {"label": "Rows analyzed", "value": int(len(frame)), "formatted_value": _format(len(frame)), "source_ref": "kpi:project:rows", "definition": {"definition_type": "count"}},
+        {"label": f"Total {label.lower()}", "value": float(values.sum()), "formatted_value": _format(values.sum(), currency=label in {"Sales", "Revenue", "Profit", "Amount", "Monetary value", "Loan amount", "Monthly income"}), "source_ref": "kpi:project:total", "definition": {"definition_type": "aggregate", "components": {"value": {"aggregation": "sum", "column": measure}}}},
+        {"label": f"Average {label.lower()}", "value": float(values.mean()), "formatted_value": _format(values.mean(), currency=label in {"Sales", "Revenue", "Profit", "Amount", "Monetary value", "Loan amount", "Monthly income"}), "source_ref": "kpi:project:average", "definition": {"definition_type": "average", "column": measure}},
     ]
     if spec.id in {"ecommerce_funnel", "website_traffic_dashboard"} and fields.get("conversion_rate"):
         rate = _numeric(frame, fields["conversion_rate"]).mean()
-        kpis.append({"label": "Conversion rate", "value": float(rate), "formatted_value": _format(rate, percent=True), "source_ref": "kpi:project:conversion"})
+        kpis.append({"label": "Conversion rate", "value": float(rate), "formatted_value": _format(rate, percent=True), "source_ref": "kpi:project:conversion", "definition": {"definition_type": "average", "column": fields["conversion_rate"]}})
     if spec.id == "ab_test_analysis" and fields.get("experiment_group") and fields.get("converted"):
         groups = frame.groupby(fields["experiment_group"], dropna=False)[fields["converted"]].mean() * 100
         if len(groups) >= 2:
             control, treatment = float(groups.iloc[0]), float(groups.iloc[1])
             kpis.append({"label": "A/B lift", "value": treatment - control, "formatted_value": _format(treatment - control, percent=True), "source_ref": "kpi:project:lift"})
     if spec.id == "customer_rfm_segmentation" and fields.get("rfm_segment"):
-        kpis.append({"label": "Customer segments", "value": int(frame[fields["rfm_segment"]].nunique()), "formatted_value": _format(frame[fields["rfm_segment"]].nunique()), "source_ref": "kpi:project:segments"})
+        kpis.append({"label": "Customer segments", "value": int(frame[fields["rfm_segment"]].nunique()), "formatted_value": _format(frame[fields["rfm_segment"]].nunique()), "source_ref": "kpi:project:segments", "definition": {"definition_type": "distinct_count", "column": fields["rfm_segment"]}})
     return [_jsonable(kpi) for kpi in kpis]
 
 
@@ -355,7 +365,11 @@ def build_project(
         output_path = Path(output_dir).expanduser().resolve()
         output_path.mkdir(parents=True, exist_ok=True)
 
+    advanced = run_advanced_analysis(spec.id, prepared, resolved)
     kpis = _kpis(spec, prepared, resolved)
+    if advanced and advanced["status"] == "completed":
+        # Evidence the project description promises leads the headline metrics.
+        kpis = advanced["kpis"] + kpis
     charts = _build_charts(spec, prepared, resolved, output_path)
     tables = _tables(spec, prepared, resolved, charts)
     try:
@@ -382,8 +396,16 @@ def build_project(
     content_by_ref.update({table["source_ref"]: table for table in tables})
     sections: list[dict[str, Any]] = [
         {"id": "summary", "section_type": "text", "title": "Executive summary", "content": _summary(spec, prepared, kpis), "position": 10},
-        {"id": "metrics", "section_type": "heading", "title": "Headline metrics", "content": "Headline metrics", "position": 20},
     ]
+    if advanced:
+        sections.append({
+            "id": "advanced_analysis",
+            "section_type": "text",
+            "title": _ADVANCED_SECTION_TITLES.get(advanced["method"], "Analytical evidence"),
+            "content": advanced["narrative"],
+            "position": 15,
+        })
+    sections.append({"id": "metrics", "section_type": "heading", "title": "Headline metrics", "content": "Headline metrics", "position": 20})
     for index, kpi in enumerate(kpis, start=1):
         sections.append({"id": f"kpi_{index}", "section_type": "kpi", "title": kpi["label"], "source_ref": kpi["source_ref"], "position": 30 + index})
     sections.append({"id": "drivers", "section_type": "heading", "title": "Drivers and trends", "content": "Drivers and trends", "position": 50})
@@ -421,7 +443,7 @@ def build_project(
     }
     html_report = render_html(manifest)
     pdf_bytes = build_pdf_bytes(manifest, document_title=spec.name, subject=spec.description)
-    xlsx_bytes = build_xlsx_bytes(manifest)
+    xlsx_bytes = build_xlsx_bytes(manifest, source_frame=prepared)
     desktop_exports = build_bi_desktop_exports(
         prepared,
         report={**report, "kpis": kpis},
@@ -459,6 +481,8 @@ def build_project(
     validation = {
         "valid": bool(layout_validation["valid"] and len(kpis) >= 2 and len(charts) >= 2 and len(tables) >= 1 and len(pdf_bytes) > 100 and len(xlsx_bytes) > 100 and len(powerbi_bytes) > 100 and len(tableau_twbx_bytes) > 100 and len(tableau_twb_bytes) > 100),
         "layout_valid": bool(layout_validation["valid"]),
+        "advanced_analysis_method": advanced["method"] if advanced else None,
+        "advanced_analysis_status": advanced["status"] if advanced else "not_applicable",
         "kpi_count": len(kpis),
         "chart_count": len(charts),
         "table_count": len(tables),
@@ -477,7 +501,13 @@ def build_project(
         "project": {"id": spec.id, "name": spec.name, "category": spec.category, "difficulty": spec.difficulty, "template_id": template["id"]},
         "status": "COMPLETED",
         "report": report,
-        "analytics": {"source_rows": int(len(source)), "prepared_rows": int(len(prepared)), "columns": [str(column) for column in prepared.columns], "field_mapping": resolved},
+        "analytics": {
+            "source_rows": int(len(source)),
+            "prepared_rows": int(len(prepared)),
+            "columns": [str(column) for column in prepared.columns],
+            "field_mapping": resolved,
+            "advanced_analysis": _jsonable(advanced) if advanced else None,
+        },
         "kpis": kpis,
         "charts": charts,
         "tables": tables,
@@ -490,6 +520,7 @@ def build_project(
         "powerbi_bytes": powerbi_bytes,
         "tableau_twbx_bytes": tableau_twbx_bytes,
         "tableau_twb_bytes": tableau_twb_bytes,
+        "desktop_export_validation": desktop_exports["validation"],
         "files": files,
         "validation": validation,
     }

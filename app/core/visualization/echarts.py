@@ -42,6 +42,22 @@ def generate_echarts_option(spec: Dict[str, Any]) -> Dict[str, Any]:
             cat = str(cat) if cat is not None else "Unknown"
             series_dict["Series"][cat] = row.get("value", 0)
 
+    # Pie charts use named slices rather than Cartesian axes. Keep this path
+    # explicit so share-of-total visuals render as real donut charts.
+    if chart_type in {"pie", "donut"}:
+        pie_data = []
+        for row in data:
+            name = row.get(category_column)
+            if name is None:
+                name = row.get("label", "Unknown")
+            pie_data.append({"name": str(name), "value": row.get("value", 0)})
+        return {
+            "backgroundColor": "transparent",
+            "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+            "legend": {"type": "scroll", "orient": "vertical", "right": "0%", "top": "middle"},
+            "series": [{"name": title, "type": "pie", "radius": ["42%", "72%"], "center": ["38%", "52%"], "avoidLabelOverlap": True, "label": {"show": False}, "emphasis": {"label": {"show": True, "fontWeight": "bold"}}, "data": pie_data}],
+        }
+
     # Build Series array
     series_array = []
     for s_name, s_data in series_dict.items():

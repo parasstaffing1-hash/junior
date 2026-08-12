@@ -54,7 +54,17 @@ def detect_basic_schema(rows: list[dict[str, Any]], columns: Iterable[str] | Non
     for name in names:
         values = [row.get(name) for row in rows]
         non_null = [value for value in values if not is_null(value)]
-        kinds = [classify_value(value) for value in non_null]
+        # Classify each distinct value once; type detection is deterministic per
+        # value, so frequency-weighting the cached verdicts is exact.
+        kind_cache: dict[Any, str] = {}
+        kinds = []
+        for value in non_null:
+            key = value if isinstance(value, (str, int, float, bool)) else str(value)
+            kind = kind_cache.get(key)
+            if kind is None:
+                kind = classify_value(value)
+                kind_cache[key] = kind
+            kinds.append(kind)
         active = set(kinds)
         if not non_null:
             detected = "string"

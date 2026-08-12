@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,11 @@ from uuid import uuid4
 
 import pandas as pd
 
+from app.core.bi.export_formats import (
+    DESKTOP_EXPORT_FORMATS,
+    resolve_export_formats,
+    write_export_files,
+)
 from app.core.dashboard.layout import validate_layout
 from app.core.dashboard.templates import (
     apply_dashboard_template,
@@ -118,23 +124,45 @@ def build_bi_report(
     template_id: str | None = None,
     output_dir: str | Path | None = None,
     findings: list[dict[str, Any]] | None = None,
+    exports: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """Build a source-backed BI dashboard and exportable report from one dataset version."""
+    """Build a source-backed BI dashboard and exportable report from one dataset version.
+
+    ``exports`` selects which artifacts are built and written to ``output_dir``;
+    it defaults to every supported format.
+    """
     if not isinstance(df, pd.DataFrame):
         raise ValueError("BI report input must be a pandas DataFrame.")
+
+    export_formats = resolve_export_formats(exports)
+
+    from app.core.bi.airline_report import build_airline_bi_report, is_airline_operations_dataset
+    if is_airline_operations_dataset(df):
+        return build_airline_bi_report(
+            df,
+            dataset_name=dataset_name,
+            source_version_id=source_version_id,
+            filters=filters,
+            template_id=template_id,
+            output_dir=output_dir,
+            findings=findings,
+            exports=export_formats,
+        )
 
     dashboard_template = get_dashboard_template(template_id)
     report_id = str(uuid4())
     output_path = Path(output_dir).expanduser().resolve() / report_id if output_dir else None
     work = df.copy(deep=True)
     filter_source = df.copy(deep=False)
-    sales_column = _find_column(work, ["sales", "weekly sales", "weekly_sales", "net sales", "revenue", "amount", "sales amount", "total sales"])
-    profit_column = _find_column(work, ["profit", "gross profit", "net profit"])
-    units_column = _find_column(work, ["units sold", "units", "quantity", "volume"])
+    sales_column = _find_column(work, ["sales", "weekly sales", "weekly_sales", "net sales", "total revenue", "total_revenue", "revenue", "amount", "sales amount", "total sales", "gross sales"])
+    profit_column = _find_column(work, ["profit", "total profit", "total_profit", "gross profit", "net profit"])
+    units_column = _find_column(work, ["units sold", "units_sold", "units", "quantity", "volume"])
     date_column = _find_column(work, ["date", "order date", "transaction date", "week", "month"])
     country_column = _find_column(work, ["country", "geography", "region"])
-    product_column = _find_column(work, ["product", "product name", "item"])
-    segment_column = _find_column(work, ["segment", "customer segment", "category"])
+    product_column = _find_column(work, ["product", "product name", "item type", "item_type", "item", "category", "product category"])
+    segment_column = _find_column(work, ["segment", "customer segment", "sales channel", "channel", "order priority", "payment mode", "paymentmode", "category"])
+    channel_column = _find_column(work, ["sales channel", "sales_channel", "channel", "payment mode", "paymentmode", "order channel"])
+    customer_column = _find_column(work, ["customer", "customer name", "customername", "client", "account"])
     store_column = _find_column(work, ["store", "store id", "store_id", "location", "location id"])
     holiday_column = _find_column(work, ["holiday flag", "holiday_flag", "holiday", "is holiday"])
     location_column = country_column or store_column
@@ -264,10 +292,31 @@ def build_bi_report(
         content = {**_jsonable(spec), "source_ref": source_ref}
         try:
             content["echarts_option"] = generate_echarts_option(content)
-        except Exception as e:
-            pass # fallback to basic frontend rendering if it fails
+        except Exception as exc:
+            # The frontend falls back to basic rendering, but the report must say so.
+            notes.append(f"Interactive rendering unavailable for {content.get('title', source_ref)}: {exc}")
         charts.append(content)
         chart_by_ref[source_ref] = content
+
+    def add_pie_chart(source_ref: str, *, category_column: str, value_column: str, title: str) -> None:
+        """Add a compact share-of-total visual for channel/category mixes."""
+        grouped = (
+            work.dropna(subset=[category_column, value_column])
+            .groupby(category_column, dropna=False)[value_column]
+            .sum()
+            .sort_values(ascending=False)
+            .head(8)
+        )
+        if grouped.empty:
+            return
+        add_chart(source_ref, {
+            "chart_type": "pie",
+            "category_column": category_column,
+            "value_column": value_column,
+            "aggregation": "sum",
+            "title": title,
+            "data": [{category_column: str(index), "value": float(value)} for index, value in grouped.items()],
+        })
 
     if sales_column and location_column:
         location_chart_name = "sales_by_country" if country_column else "sales_by_store"
@@ -329,6 +378,54 @@ def build_bi_report(
             add_chart("chart:sales_over_time", spec)
         except Exception as exc:
             notes.append(f"Sales trend unavailable: {exc}")
+
+    if sales_column and channel_column:
+        try:
+            add_pie_chart("chart:sales_by_channel", category_column=channel_column, value_column=sales_column, title="Revenue mix by sales channel")
+        except Exception as exc:
+            notes.append(f"Sales-channel mix unavailable: {exc}")
+
+    if units_column and product_column:
+        chart_output = _chart_path(output_path, "units_by_product") if output_path else None
+        try:
+            spec = build_bar_chart(
+                work,
+                category_column=product_column,
+                value_column=units_column,
+                aggregation="sum",
+                top_n=10,
+                orientation="horizontal",
+                title=f"Units sold by {product_column}",
+                x_label="Units sold",
+                y_label=product_column,
+                output_path=chart_output,
+            )
+            if chart_output:
+                spec["artifact_path"] = chart_output
+            add_chart("chart:units_by_product", spec)
+        except Exception as exc:
+            notes.append(f"Units by product unavailable: {exc}")
+
+    if profit_column and date_column:
+        chart_output = _chart_path(output_path, "profit_over_time") if output_path else None
+        try:
+            spec = build_line_chart(
+                work,
+                x_column=date_column,
+                y_column=profit_column,
+                aggregation="sum",
+                parse_datetime=True,
+                frequency="MS",
+                fill_missing_intervals=True,
+                title="Profit trend over time",
+                y_label="Profit",
+                output_path=chart_output,
+            )
+            if chart_output:
+                spec["artifact_path"] = chart_output
+            add_chart("chart:profit_over_time", spec)
+        except Exception as exc:
+            notes.append(f"Profit trend unavailable: {exc}")
 
     if not charts:
         notes.append("No compatible categorical or time fields were available for charts.")
@@ -520,42 +617,35 @@ def build_bi_report(
     }
 
     html_report = render_html(manifest)
-    pdf_bytes = build_pdf_bytes(manifest, document_title=report["title"], subject=report["description"])
-    xlsx_bytes = build_xlsx_bytes(manifest)
-    desktop_exports = build_bi_desktop_exports(
-        work,
-        report={**report, "kpis": kpis},
-        dashboard=dashboard,
-        manifest=manifest,
-        dataset_name=dataset_name,
-        source_version_id=source_version_id,
-    )
+    pdf_bytes = build_pdf_bytes(manifest, document_title=report["title"], subject=report["description"]) if "pdf" in export_formats else b""
+    xlsx_bytes = build_xlsx_bytes(manifest, source_frame=work) if "xlsx" in export_formats else b""
+    desktop_exports = {"powerbi": b"", "tableau": b"", "tableau_twb": b"", "validation": {}}
+    if export_formats.intersection(DESKTOP_EXPORT_FORMATS):
+        desktop_exports = build_bi_desktop_exports(
+            work,
+            report={**report, "kpis": kpis},
+            dashboard=dashboard,
+            manifest=manifest,
+            dataset_name=dataset_name,
+            source_version_id=source_version_id,
+        )
     powerbi_bytes = desktop_exports["powerbi"]
     tableau_twbx_bytes = desktop_exports["tableau"]
     tableau_twb_bytes = desktop_exports["tableau_twb"]
     files = {}
     if output_path:
-        output_path.mkdir(parents=True, exist_ok=True)
-        html_path = output_path / "report.html"
-        pdf_path = output_path / "report.pdf"
-        xlsx_path = output_path / "report.xlsx"
-        powerbi_path = output_path / "report.pbip.zip"
-        tableau_path = output_path / "report.twbx"
-        tableau_twb_path = output_path / "report.twb"
-        html_path.write_text(html_report, encoding="utf-8")
-        pdf_path.write_bytes(pdf_bytes)
-        xlsx_path.write_bytes(xlsx_bytes)
-        powerbi_path.write_bytes(powerbi_bytes)
-        tableau_path.write_bytes(tableau_twbx_bytes)
-        tableau_twb_path.write_bytes(tableau_twb_bytes)
-        files = {
-            "html": str(html_path),
-            "pdf": str(pdf_path),
-            "xlsx": str(xlsx_path),
-            "powerbi": str(powerbi_path),
-            "tableau": str(tableau_path),
-            "tableau_twb": str(tableau_twb_path),
-        }
+        files = write_export_files(
+            output_path,
+            export_formats,
+            {
+                "html": html_report.encode("utf-8"),
+                "pdf": pdf_bytes,
+                "xlsx": xlsx_bytes,
+                "powerbi": powerbi_bytes,
+                "tableau": tableau_twbx_bytes,
+                "tableau_twb": tableau_twb_bytes,
+            },
+        )
 
     return {
         "report_id": report_id,
@@ -586,5 +676,7 @@ def build_bi_report(
         "powerbi_bytes": powerbi_bytes,
         "tableau_twbx_bytes": tableau_twbx_bytes,
         "tableau_twb_bytes": tableau_twb_bytes,
+        "desktop_export_validation": desktop_exports["validation"],
+        "export_formats": sorted(export_formats),
         "files": files,
     }

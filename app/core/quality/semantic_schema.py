@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.geographic.semantic import detect_geographic_semantics
+
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^[+()\-\.\s0-9]{7,30}$")
 POSTAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 -]{2,11}$")
@@ -29,10 +31,19 @@ def _non_null(rows: list[dict[str, Any]], name: str) -> list[Any]:
 
 
 def _ratio(values: list[Any], predicate) -> float:
-    return sum(1 for value in values if predicate(str(value).strip())) / len(values) if values else 0.0
+    if not values:
+        return 0.0
+    # Evaluate each distinct rendered value once, then weight by frequency.
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value).strip()
+        counts[key] = counts.get(key, 0) + 1
+    matched = sum(count for key, count in counts.items() if predicate(key))
+    return matched / len(values)
 
 
 def detect_semantic_schema(rows: list[dict[str, Any]], basic_schema: dict[str, Any]) -> dict[str, Any]:
+    geographic = detect_geographic_semantics(rows, basic_schema)
     columns: list[dict[str, Any]] = []
     for physical in basic_schema.get("columns", []):
         name = physical["name"]
@@ -43,8 +54,11 @@ def detect_semantic_schema(rows: list[dict[str, Any]], basic_schema: dict[str, A
         role = None
         confidence = 0.0
         warnings: list[str] = []
+        geo = geographic["by_name"].get(name)
 
-        if lower_name in PHONE_NAMES:
+        if geo:
+            semantic, confidence, role = geo["semantic_type"], geo["confidence"], "geography"
+        elif lower_name in PHONE_NAMES:
             semantic, confidence = "phone_number", 0.95
         elif lower_name in POSTAL_NAMES:
             semantic, confidence = "postal_code", 0.94
@@ -74,6 +88,8 @@ def detect_semantic_schema(rows: list[dict[str, Any]], basic_schema: dict[str, A
             semantic, confidence = "category", 0.88
         elif lower_name in {"name", "full_name", "person_name", "first_name", "last_name"}:
             semantic, confidence = "person_name", 0.84
+        elif physical["detected_type"] in {"integer", "float", "number", "numeric"}:
+            semantic, confidence, role = "numeric_measure", 0.82, "measure"
         else:
             semantic, confidence = "free_text", 0.65 if physical["detected_type"] == "string" else 0.55
 
@@ -83,6 +99,12 @@ def detect_semantic_schema(rows: list[dict[str, Any]], basic_schema: dict[str, A
             "semantic_type": semantic,
             "semantic_role": role,
             "confidence": confidence,
+            "country": geo.get("country") if geo else None,
+            "evidence": geo.get("evidence", []) if geo else [],
             "warnings": warnings,
         })
-    return {"columns": columns, "by_name": {item["name"]: item for item in columns}}
+    return {
+        "columns": columns,
+        "by_name": {item["name"]: item for item in columns},
+        "country_context": geographic.get("country_context"),
+    }

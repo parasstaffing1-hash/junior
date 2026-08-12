@@ -176,6 +176,23 @@ _PROJECTS: tuple[ProjectSpec, ...] = (
 
 _BY_ID = {project.id: project for project in _PROJECTS}
 
+FLAGSHIP_PROJECT_IDS: tuple[str, ...] = (
+    "superstore_sales_dashboard",
+    "customer_rfm_segmentation",
+    "supply_chain_inventory",
+)
+
+END_TO_END_STAGES: tuple[str, ...] = (
+    "raw_data",
+    "cleaning",
+    "sql_database",
+    "semantic_model",
+    "analysis",
+    "dashboard",
+    "insights",
+    "recommendations",
+)
+
 
 def _public(spec: ProjectSpec) -> dict[str, Any]:
     value = asdict(spec)
@@ -183,11 +200,17 @@ def _public(spec: ProjectSpec) -> dict[str, Any]:
     value["fields"] = {key: list(values) for key, values in value["fields"].items()}
     value["charts"] = [dict(chart) for chart in value["charts"]]
     value["template_id"] = spec.template_id
+    value["portfolio_tier"] = "flagship" if spec.id in FLAGSHIP_PROJECT_IDS else "skill_drill"
+    value["end_to_end_stages"] = list(END_TO_END_STAGES)
     return value
 
 
 def list_project_specs() -> list[dict[str, Any]]:
     return [_public(project) for project in _PROJECTS]
+
+
+def list_flagship_project_specs() -> list[dict[str, Any]]:
+    return [_public(_BY_ID[project_id]) for project_id in FLAGSHIP_PROJECT_IDS]
 
 
 def get_project_spec(project_id: str) -> ProjectSpec:

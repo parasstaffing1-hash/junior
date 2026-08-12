@@ -17,6 +17,12 @@ ASSET_TYPES = {
     "report",
     "alert",
     "schedule",
+    "feature_set",
+    "data_product",
+    "model_card",
+    "monitoring_policy",
+    "experiment",
+    "geographic_map",
 }
 ASSET_STATUSES = {"draft", "validated", "published", "deprecated"}
 
@@ -34,6 +40,12 @@ REQUIRED_DEFINITION_KEYS = {
     "report": {"sections"},
     "alert": {"condition"},
     "schedule": {"cron", "target_asset_id"},
+    "feature_set": {"features"},
+    "data_product": {"contract"},
+    "model_card": {"model_version_id"},
+    "monitoring_policy": {"checks"},
+    "experiment": {"objective"},
+    "geographic_map": {"map_type", "dataset_id", "configuration"},
 }
 
 

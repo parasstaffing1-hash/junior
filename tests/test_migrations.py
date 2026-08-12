@@ -39,6 +39,21 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         "report_definitions",
         "automation_runs",
         "workspace_assets",
+        "registered_models",
+        "model_versions",
+        "experiments",
+        "experiment_runs",
+        "monitoring_policies",
+        "monitoring_runs",
+        "approval_records",
+        "geographic_boundaries",
+        "geographic_mappings",
+    }
+    assert {column["name"] for column in inspector.get_columns("automation_runs")} >= {
+        "job_type",
+        "progress",
+        "result",
+        "artifact_ids",
     }
     assert any(
         set(constraint["column_names"]) == {"dataset_id", "version_number"}

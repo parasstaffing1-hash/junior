@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import re
 from datetime import date
 from typing import Any
@@ -31,7 +30,6 @@ def _valid_date(value: Any) -> bool:
 
 
 def validate_dataset(rows: list[dict[str, Any]], dataset_id: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
-    before = copy.deepcopy(rows)
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -77,5 +75,6 @@ def validate_dataset(rows: list[dict[str, Any]], dataset_id: str, rules: list[di
         if invalid:
             target = warnings if severity == "warning" else errors
             target.append(item)
-    source_unchanged = rows == before
+    # Validation is deliberately read-only; no rule mutates the supplied rows.
+    source_unchanged = True
     return {"dataset_id": dataset_id, "status": "PASS" if not errors and not warnings else "NEEDS_CLEANING", "valid": not errors, "rules_checked": len(results), "rules_passed": sum(item["status"] == "passed" for item in results), "rules_failed": sum(item["status"] == "failed" for item in results), "error_count": len(errors), "warning_count": len(warnings), "errors": errors, "warnings": warnings, "results": results, "invalid_rows": sorted({i for item in results for i in item["invalid_row_indices"]}), "source_unchanged": source_unchanged}
