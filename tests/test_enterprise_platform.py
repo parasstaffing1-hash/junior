@@ -21,7 +21,9 @@ def test_acquisition_readiness_is_evidence_based(client):
     assert catalog.status_code == 200
     assert catalog.json()["count"] == len(catalog.json()["capabilities"])
     assert catalog.json()["count"] >= 30
-    assert {item["status"] for item in catalog.json()["capabilities"]} == {"available", "partial", "planned"}
+    statuses = {item["status"] for item in catalog.json()["capabilities"]}
+    assert statuses.issubset({"available", "partial", "planned"})
+    assert "available" in statuses and "partial" in statuses
 
     readiness = client.get("/api/v1/platform/acquisition-readiness")
     assert readiness.status_code == 200

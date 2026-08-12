@@ -14,6 +14,9 @@ commit real credentials to the repository:
 ```text
 APP_ENV=production
 DATABASE_URL=postgresql+psycopg2://<runtime-user>:<password>@<managed-postgres>/<database>
+POSTGRES_USER=<runtime-user>
+POSTGRES_PASSWORD=<secret-managed-password>
+POSTGRES_DB=analytics
 AUTH_MODE=api_key
 ADMIN_API_KEY=<long-random-bootstrap-key>
 ALLOWED_ORIGINS=https://<approved-report-host>
@@ -58,6 +61,9 @@ out of request logs and the database.
 6. Call `GET /api/v1/platform/production-readiness` with the bootstrap key and
    tenant header. Continue until the response has `ready: true` and no blocking
    checks.
+7. Run `python scripts/validate_release_configuration.py --environment test`
+   in CI and `--environment production` only inside the deployment environment;
+   the latter must pass before public traffic is enabled.
 
 ## Operational checks
 
@@ -77,6 +83,13 @@ out of request logs and the database.
 - Retention runs default to dry-run. Configure legal holds before cleanup;
   execution requires an administrator and ticket/evidence payload, and versions
   with downstream lineage are protected from deletion.
+- Semantic-model design is approval-first. Validate the declared grain,
+  surrogate-key strategy, SCD history, date roles, bridges, many-to-many
+  relationships, explicit measures, and reference DDL before publishing to a
+  target semantic engine.
+- DAX review is static and evidence-producing locally. Run the DAX analyzer,
+  then complete target-engine reconciliation, DAX Studio server timings,
+  formula/storage-engine review, and RLS/OLS tests before release.
 - Dataset imports, automation actions, intelligence jobs, schedules, retries,
   and worker leases are tenant-scoped and persisted in PostgreSQL.
 

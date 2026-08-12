@@ -59,10 +59,15 @@ def test_pbip_contains_enterprise_engineering_assets_and_api(client):
             "engineering/advanced_dax_library.dax",
             "engineering/tabular_editor_calculation_groups.csx",
             "engineering/semantic_model_ci.yml",
+            "DAX_ANALYSIS.json",
+            "POWER_QUERY_ANALYSIS.json",
         }
         assert required.issubset(names)
         contract = json.loads(archive.read("enterprise_blueprint.json"))
         assert contract["capability_matrix"]["domain_count"] == 10
+        model_contract = json.loads(archive.read("model_contract.json"))
+        assert model_contract["local_engineering_review"]["dax"]["measure_count"] >= 1
+        assert model_contract["local_engineering_review"]["power_query"]["external_execution_required"] is True
 
     matrix_response = client.get("/api/v1/platform/enterprise-bi-capabilities")
     assert matrix_response.status_code == 200

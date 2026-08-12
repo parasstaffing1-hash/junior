@@ -42,7 +42,7 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Statistics / EDA / findings | `POST /api/v1/datasets/{dataset_id}/statistics/summary`, `/eda/report`, and `/findings` |
 | Chart recommendations | `POST /api/v1/datasets/{dataset_id}/visualization/recommend` |
 | KPI calculation | `POST /api/v1/datasets/{dataset_id}/kpis/calculate` |
-| Validate / run read-only SQL | `POST /api/v1/sql/validate` and `POST /api/v1/datasets/{dataset_id}/sql/query` (query table: `dataset`) |
+| Validate / run read-only SQL | `POST /api/v1/sql/validate` and `POST /api/v1/datasets/{dataset_id}/sql/query` (query table: `dataset`); results include bounded plans, complexity, full-scan/index candidates, partition/materialized-view/stored-procedure signals, and target-engine validation gates |
 | 20-question SQL proficiency benchmark | `POST /api/v1/sql/proficiency-benchmark` (pass target: 80%) |
 | Query a new multi-table SQLite database | `POST /api/v1/sql/database-query` as multipart `file`, `sql`, `max_rows`, and `timeout_seconds` |
 | Decision-ready business analysis | `POST /api/v1/datasets/{dataset_id}/business-analysis` returns Problem → analysis → evidence → insight → recommendation |
@@ -58,6 +58,8 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Data-intelligence catalog | `GET /api/v1/intelligence/capabilities` |
 | Conversational Data Intelligence | `GET /api/v1/conversation/catalog`; `POST /api/v1/datasets/{dataset_id}/conversation/ask` provides bounded plain-language analysis with answer, intent, execution plan, evidence, scope, provenance, follow-ups, and caveats |
 | BI-ready data preparation | `GET /api/v1/bi-readiness/catalog`; `POST /api/v1/datasets/{dataset_id}/bi-readiness/profile`, `/preview`, and `/apply` provide approval-first field standardization, numeric/date normalization, duplicate review, FactData grain, dimensions, measures, date-model recommendations, and immutable-version lineage |
+| Advanced semantic modeling | `GET /api/v1/bi-readiness/semantic-model/catalog`; `POST /api/v1/bi-readiness/semantic-model/validate` or `POST /api/v1/datasets/{dataset_id}/bi-readiness/semantic-model` validates star/snowflake choices, explicit grain, surrogate keys, SCD1/SCD2, role-playing dates, bridge/many-to-many patterns, degenerate dimensions, Import/DirectQuery/Direct Lake/Composite mode, shared models, aggregations, perspectives, field parameters, relationships, DAX measure definitions, rationale, and reference DDL |
+| DAX measure review | `POST /api/v1/bi-readiness/dax/analyze` classifies filter/row context, context transition, iterators, virtual tables, time intelligence, ranking, dynamic measures and disconnected-table patterns; it emits review/performance gates rather than claiming target-engine execution |
 | Forecasting | `POST /api/v1/datasets/{dataset_id}/forecasting/{operation}` or `/forecast` |
 | ML readiness/train/compare/tune | `POST /api/v1/datasets/{dataset_id}/ml/readiness`, `/train`, `/compare`, and `/tune` |
 | Unsupervised learning | `POST /api/v1/datasets/{dataset_id}/ml/unsupervised/{run|compare|stability}` |
@@ -103,6 +105,8 @@ The cumulative forecasting, data-science, MLOps, data-engineering, and orchestra
 - **SQL:** a deterministic 20-question suite covers joins, CTEs, subqueries, grouped aggregates, windows, `CASE WHEN`, date logic, ranking, running totals, duplicate detection, cohort/retention analysis, and `EXPLAIN QUERY PLAN` basics. The platform must score at least 80%; the current suite is also exercised by automated tests.
 - **Excel / MIS automation:** every source-backed XLSX includes `Raw Data`, `Pivot Summary`, `Formula Lab`, `Power Query`, `Dashboard`, `Exceptions`, `Reconciliation`, `MIS Control`, and `Workbook Guide` sheets. Multi-sheet workbooks can be combined with `_source_sheet` lineage. Reconciliation provides row-count and numeric control totals; Exceptions provides duplicate/missing-value review; MIS Control provides an operator checklist. Formulas recalculate when opened in modern Excel. The M script is reviewable and ready for Power Query; the calculated workbook output does not depend on Excel automation running on the server.
 - **Power BI:** the PBIP semantic model records its fact-table grain, dimensions, relationships, measure definitions, date logic, RLS publication gate, and performance decisions in `model_contract.json` and `MODEL_DESIGN.md`. Client identities are never invented; the included RLS role fails closed until an approved mapping is configured.
+- **Semantic modeling:** the approval-first semantic-model validator makes grain, surrogate keys, SCD1/SCD2 history, role-playing dates, snowflake parents, bridge tables, many-to-many handling, degenerate dimensions, relationship direction, explicit measures, model rationale, and reference DDL inspectable before publication.
+- **DAX review:** the local analyzer identifies filter context, row context, context transition, iterators, virtual tables, time intelligence, ranking, dynamic measure selectors and disconnected-table patterns, with formula-engine risk warnings. DAX Studio/server-timing evidence remains a target-engine release gate.
 - **Senior BI engineering:** every PBIP package also includes an enterprise scale architecture, PostgreSQL partition/index/materialized-view pattern, incremental-refresh M function, advanced DAX library, Tabular Editor calculation-group script, and dev/test/prod CI/CD scaffold. These are generated engineering assets, not false claims that a customer Fabric/Power BI tenant, gateway, Entra identity, capacity, or licensed desktop tool has been operated.
 - **Staff operating modes:** the Staff BI Control Center sequences eight stages—intake/quality, modeling, SQL evidence, BI delivery, engineering, forecast/ML/monitoring, governance, and operations. Automatic mode generates bounded, reviewable checks; manual mode exposes stage controls and keeps decisions explicit. Publishing, deployment, model promotion, destructive replay, external alerts, and external Power BI/Fabric/cloud side effects remain approval-gated and connector-dependent.
 - **Production web authentication:** when `AUTH_MODE=api_key` and tenant enforcement are enabled, enter the scoped API key and tenant ID in Settings. The frontend attaches them to API calls using tab-scoped session storage; secrets are not written to the platform database.
@@ -132,9 +136,21 @@ docker compose up --build
 
 Then open <http://127.0.0.1:8000>. The application waits for PostgreSQL to become healthy before starting. Set `ADMIN_API_KEY` before starting production Compose; the separate `worker` service runs the durable queue.
 
+Compose requires explicit `DATABASE_URL`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` values;
+it no longer ships a default database password. For a multi-replica deployment,
+review `deploy/kubernetes/automated-data-analyst.yaml` and its accompanying
+README before applying it to a real cluster.
+
 The release checklist, secret/configuration requirements, external BI/identity
 acceptance tests, backup/restore procedure, and deliberate production gates are
 in [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md).
+The source-controlled release contract can be checked without customer secrets
+with `python scripts/validate_release_configuration.py --environment test`;
+production mode fails closed until the required deployment configuration exists.
+The multi-replica deployment contract is under
+`deploy/kubernetes/automated-data-analyst.yaml`; it must be customized with a
+pinned image digest, managed database/storage, secrets, ingress TLS, workload
+identity, backups, and load-test evidence before public traffic.
 
 ## Test
 

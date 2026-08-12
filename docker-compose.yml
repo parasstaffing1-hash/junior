@@ -2,15 +2,15 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpassword
-      POSTGRES_DB: analytics
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER before starting Compose}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Compose}
+      POSTGRES_DB: ${POSTGRES_DB:-analytics}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d analytics"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -20,7 +20,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg2://admin:adminpassword@db:5432/analytics
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL before starting Compose}
       STORAGE_ROOT: /app/storage
       MAX_UPLOAD_BYTES: 104857600
       APP_ENV: production
@@ -39,7 +39,7 @@ services:
     build: .
     command: ["python", "scripts/run_worker.py"]
     environment:
-      DATABASE_URL: postgresql+psycopg2://admin:adminpassword@db:5432/analytics
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL before starting Compose}
       STORAGE_ROOT: /app/storage
       APP_ENV: production
       AUTH_MODE: api_key

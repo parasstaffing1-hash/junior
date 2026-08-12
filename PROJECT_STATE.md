@@ -10,7 +10,11 @@ Updated: 2026-08-12
 - Added governed semantic metric queries, column-level lineage graphs, Prometheus-compatible request metrics, approval-gated Power BI/Fabric/Graph/Tableau integration contracts, hardened non-root containers, health checks, CI, and database backup tooling.
 - Added tenant-scoped geographic boundaries/mappings, governed review threads/comments/approval evidence/shared collections, and a bounded reproducible notebook runtime with allowlisted analysis operations.
 - Added scheduled metric discovery and connector micro-batch actions, tenant-scoped retention policies with dry-run evaluation, legal holds and approval-gated deletion, bounded route latency/error SLO snapshots, and production session access controls in Settings.
-- Verification after this increment: 253 regression tests are green; production readiness remains fail-closed until deployment infrastructure and external credentials are configured.
+- Added an approval-first advanced semantic-model designer/validator covering explicit grain, surrogate keys, SCD1/SCD2, role-playing dates, snowflake parents, bridges/many-to-many, degenerate dimensions, storage modes, shared models, aggregations, perspectives, field parameters, model rationale, and reference DDL.
+- Added static DAX and Power Query/M contract analyzers for context transition, iterators, virtual tables, time intelligence, dynamic measures, query folding, reusable functions, incremental refresh windows, error handling, and schema drift.
+- Extended SQL plan review with complexity, index candidates, partition/materialized-view/stored-procedure signals; added a fail-closed release configuration validator used by CI.
+- Added a reviewable Kubernetes production topology with two API replicas, two workers, readiness/liveness probes, HPA, resource limits, non-root security context, disruption protection, and explicit secret/image/storage placeholders. Compose now requires explicit database credentials and no longer ships a default password.
+- Verification after this increment: 269 regression tests are green, including full 101–300 acceptance coverage, semantic-model/DAX/Power Query/SQL optimization evidence, release validation, PBIP engineering assets, and deployment artifact checks; production readiness remains fail-closed until deployment infrastructure and external credentials are configured.
 
 ## Current milestone
 

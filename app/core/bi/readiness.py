@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from app.core.intelligence.common import IntelligenceError, json_safe
+from app.core.bi.semantic_model import build_semantic_model_contract
 
 
 def _safe_identifier(value: Any, fallback: str = "column") -> str:
@@ -113,6 +114,23 @@ def _model_contract(profile: dict[str, Any], *, columns: list[str] | None = None
     }
 
 
+def _advanced_model_contract(profile: dict[str, Any], *, columns: list[str] | None = None) -> dict[str, Any]:
+    """Create a conservative advanced model proposal from the profiled roles."""
+    selected = list(columns or profile.get("column_mapping", {}).values())
+    design: dict[str, Any] = {
+        "grain": "one row per BI-ready source record",
+        "grain_columns": list(profile.get("identifier_columns", []))[:1] or selected[:1],
+        "grain_confirmed": False,
+        "fact": {"name": "FactData", "columns": selected, "surrogate_key": "fact_sk"},
+        "dimension_columns": [item for item in profile.get("dimension_columns", []) if item in selected],
+        "measure_columns": [item for item in profile.get("measure_columns", []) if item in selected],
+    }
+    date_columns = [item for item in profile.get("date_columns", []) if item in selected]
+    if date_columns:
+        design["date_column"] = date_columns[0]
+    return build_semantic_model_contract(selected, design)
+
+
 def build_bi_readiness_profile(frame: pd.DataFrame, *, dataset_id: str | None = None, source_version_id: str | None = None) -> dict[str, Any]:
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         raise IntelligenceError("EMPTY_DATASET", "A non-empty dataset is required to build BI-ready data.")
@@ -202,6 +220,7 @@ def build_bi_readiness_profile(frame: pd.DataFrame, *, dataset_id: str | None = 
         "warnings": ["BI-ready preparation does not infer business meaning or certify metric definitions.", "Review the fact grain, relationships, measures, and security policy before publishing to Power BI or Tableau."],
     }
     profile["model_contract"] = _model_contract(profile)
+    profile["advanced_model_contract"] = _advanced_model_contract(profile)
     return json_safe(profile)
 
 
@@ -257,6 +276,7 @@ def apply_bi_readiness(frame: pd.DataFrame, profile: dict[str, Any], *, options:
             applied.append("add_bi_row_id")
     final_profile = build_bi_readiness_profile(output, dataset_id=profile.get("dataset_id"), source_version_id=profile.get("source_version_id"))
     final_profile["model_contract"] = _model_contract(final_profile, columns=list(output.columns), row_count=len(output))
+    final_profile["advanced_model_contract"] = _advanced_model_contract(final_profile, columns=list(output.columns))
     return {
         "dataframe": output,
         "execution": {

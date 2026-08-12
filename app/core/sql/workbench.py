@@ -94,6 +94,7 @@ def _validate_options(max_rows: int, timeout_seconds: float) -> tuple[int, float
 def _optimization_review(sql: str, query_plan: list[dict[str, Any]]) -> dict[str, Any]:
     structural = _structural_sql(sql).casefold()
     suggestions: list[str] = []
+    features = detect_sql_features(sql)
     if re.search(r"\bselect\s+\*", structural):
         suggestions.append("Select only the columns needed by the analysis instead of SELECT *.")
     if " limit " not in f" {structural} " and not re.search(r"\b(?:count|sum|avg|min|max)\s*\(", structural):
@@ -101,13 +102,52 @@ def _optimization_review(sql: str, query_plan: list[dict[str, Any]]) -> dict[str
     full_scans = [row["detail"] for row in query_plan if "scan " in row["detail"].casefold() and "using index" not in row["detail"].casefold()]
     if full_scans:
         suggestions.append("Review indexes for columns used in joins, filters, and ordering; the plan contains a full table scan.")
+    if "date_manipulation" in features and re.search(r"\bwhere\b", structural):
+        suggestions.append("Keep date predicates sargable; filter on the raw date column with a range instead of wrapping it in a function.")
+    if "aggregate" in features and "group_by" in features:
+        suggestions.append("For repeated aggregate workloads, consider a maintained aggregate table or materialized view and reconcile it to the fact table.")
+    if "window_function" in features:
+        suggestions.append("Index or cluster the window PARTITION BY and ORDER BY keys where the target engine supports it; verify the sort cost in the plan.")
+    if "cohort_or_retention" in features:
+        suggestions.append("Materialize first-event/cohort keys upstream when retention queries repeat across reports.")
+    column_candidates: list[str] = []
+    for left, right in re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b", structural):
+        candidate = f"{left}.{right}"
+        if candidate not in column_candidates and right.casefold() not in {"*", "as"}:
+            column_candidates.append(candidate)
+    bare_candidates = []
+    for keyword in ("join", "where", "order by", "group by", "partition by"):
+        match = re.search(rf"\b{keyword}\s+([a-zA-Z_][a-zA-Z0-9_]*)", structural)
+        if match and match.group(1).casefold() not in bare_candidates:
+            bare_candidates.append(match.group(1).casefold())
+    if full_scans and not column_candidates and not bare_candidates:
+        suggestions.append("Capture the target engine's actual indexes and statistics before choosing a physical design.")
     if not suggestions:
         suggestions.append("The bounded query plan has no obvious basic optimization warning.")
+    complexity = {
+        "characters": len(sql),
+        "joins": len(re.findall(r"\b(?:inner|left|right|full|cross)?\s*join\b", structural)),
+        "ctes": len(re.findall(r"\bwith\b|\)\s*,\s*[a-zA-Z_]", structural)),
+        "subqueries": len(re.findall(r"\(\s*select\b", structural)),
+        "aggregates": len(re.findall(r"\b(?:sum|count|avg|min|max)\s*\(", structural)),
+        "window_functions": len(re.findall(r"\bover\s*\(", structural)),
+        "predicates": len(re.findall(r"\b(?:where|having|on)\b", structural)),
+        "select_star": bool(re.search(r"\bselect\s+\*", structural)),
+    }
     return {
         "query_plan": query_plan,
         "full_scan_count": len(full_scans),
         "suggestions": suggestions,
-        "review_level": "basic",
+        "review_level": "advanced_static",
+        "complexity": complexity,
+        "index_candidates": column_candidates or bare_candidates,
+        "physical_design": {
+            "partitioning_candidate": "date_manipulation" in features and bool(re.search(r"\bwhere\b", structural)),
+            "materialized_view_candidate": "aggregate" in features and "group_by" in features,
+            "covering_index_candidate": bool(full_scans and ("order by" in structural or "where" in structural)),
+            "stored_procedure_candidate": bool("cte" in features and ("window_function" in features or "cohort_or_retention" in features)),
+        },
+        "engine_validation_required": True,
     }
 
 

@@ -272,8 +272,8 @@ def professional_capability_matrix() -> dict[str, Any]:
             "id": "sql",
             "status": "available",
             "target_score": 80,
-            "capabilities": ["joins", "CTEs", "subqueries", "GROUP BY and aggregates", "window functions", "CASE WHEN", "date manipulation", "ranking and running totals", "duplicate detection", "cohort/retention analysis", "basic query-plan optimization"],
-            "evidence": ["multi-table uploaded SQLite query endpoint", "read-only safety gate", "feature detection", "EXPLAIN QUERY PLAN review"],
+            "capabilities": ["joins", "CTEs", "subqueries", "GROUP BY and aggregates", "window functions", "CASE WHEN", "date manipulation", "ranking and running totals", "duplicate detection", "cohort/retention analysis", "query-plan complexity", "index candidates", "partition/materialized-view/stored-procedure guidance"],
+            "evidence": ["multi-table uploaded SQLite query endpoint", "read-only safety gate", "feature detection", "EXPLAIN QUERY PLAN review", "advanced static physical-design review"],
         },
         {
             "id": "excel",
@@ -284,8 +284,8 @@ def professional_capability_matrix() -> dict[str, Any]:
         {
             "id": "power_bi",
             "status": "available",
-            "capabilities": ["Power Query transformations", "star schema", "fact and dimension tables", "relationships", "date table", "DAX measures", "time intelligence", "drill-through page", "tooltip page", "slicers", "KPI cards", "RLS template", "performance guidance", "dashboard UX", "model rationale"],
-            "evidence": ["validated PBIP project", "model.bim", "MODEL_DESIGN.md", "RLS_CONFIGURATION.md", "export_manifest.json"],
+            "capabilities": ["Power Query transformations", "Power Query parameter/function/folding review", "star and snowflake schema", "fact and dimension tables", "grain and surrogate keys", "SCD1/SCD2", "role-playing dates", "bridge and many-to-many patterns", "relationships", "date table", "DAX measures", "DAX filter/row/context-transition review", "iterators and virtual tables", "time intelligence", "drill-through page", "tooltip page", "slicers", "KPI cards", "RLS template", "performance guidance", "dashboard UX", "model rationale"],
+            "evidence": ["validated PBIP project", "model.bim", "MODEL_DESIGN.md", "RLS_CONFIGURATION.md", "export_manifest.json", "approval-first semantic-model validator", "static DAX and Power Query analyzers"],
         },
         {
             "id": "business_analysis",

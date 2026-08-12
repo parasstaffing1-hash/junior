@@ -1,0 +1,199 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: automated-data-analyst
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: automated-data-analyst-runtime
+  namespace: automated-data-analyst
+data:
+  APP_ENV: production
+  AUTH_MODE: api_key
+  REQUIRE_TENANT_HEADER: "true"
+  JOB_WORKER_ENABLED: "true"
+  STORAGE_ROOT: /app/storage
+  ALLOWED_ORIGINS: https://replace-with-approved-report-host.example
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: automated-data-analyst
+  namespace: automated-data-analyst
+spec:
+  selector:
+    app: automated-data-analyst
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: automated-data-analyst
+  namespace: automated-data-analyst
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: automated-data-analyst
+  template:
+    metadata:
+      labels:
+        app: automated-data-analyst
+    spec:
+      serviceAccountName: automated-data-analyst
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: replace-with-pinned-registry-image@sha256:replace-before-deploy
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: automated-data-analyst-runtime
+            - secretRef:
+                name: automated-data-analyst-secrets
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: automated-data-analyst-storage
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: automated-data-analyst-worker
+  namespace: automated-data-analyst
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: automated-data-analyst-worker
+  template:
+    metadata:
+      labels:
+        app: automated-data-analyst-worker
+    spec:
+      serviceAccountName: automated-data-analyst
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: replace-with-pinned-registry-image@sha256:replace-before-deploy
+          command: ["python", "scripts/run_worker.py"]
+          envFrom:
+            - configMapRef:
+                name: automated-data-analyst-runtime
+            - secretRef:
+                name: automated-data-analyst-secrets
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: storage
+              mountPath: /app/storage
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: automated-data-analyst-storage
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: automated-data-analyst
+  namespace: automated-data-analyst
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: automated-data-analyst-storage
+  namespace: automated-data-analyst
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: automated-data-analyst
+  namespace: automated-data-analyst
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: automated-data-analyst
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: automated-data-analyst
+  namespace: automated-data-analyst
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: automated-data-analyst

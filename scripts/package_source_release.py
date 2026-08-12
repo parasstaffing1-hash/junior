@@ -13,6 +13,8 @@ ARCHIVE_ROOT = "junior_data_intelligence_os_tools_1_300"
 
 SOURCE_DIRECTORIES = (
     "app",
+    ".github",
+    "deploy",
     "docs",
     "examples",
     "famous_datasets",
@@ -33,6 +35,7 @@ SOURCE_FILES = (
     "preview.py",
     "README.md",
     "requirements.txt",
+    "requirements-connectors.txt",
     "validate.py",
 )
 EXCLUDED_DIRECTORY_NAMES = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "storage", "dist", "venv", ".venv", ".git"}

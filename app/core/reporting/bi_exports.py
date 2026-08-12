@@ -28,6 +28,8 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 import pandas as pd
 
 from app.core.enterprise.bi_architecture import enterprise_bi_blueprint, enterprise_bi_markdown
+from app.core.bi.dax import analyze_dax_measures
+from app.core.bi.power_query import analyze_power_query
 
 
 PBIP_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json"
@@ -616,6 +618,15 @@ def _semantic_model_parts(
         "The generator does not invent client identities or silently grant access.\n"
     )
     entries["model_contract.json"] = _json_bytes(contract)
+    dax_analysis = analyze_dax_measures([{"name": item["name"], "expression": f"{item['name']} := {item['expression']}", "context": "measure"} for item in fact_table["measures"]])
+    power_query_analysis = analyze_power_query(_m_expression(modeled, fact_specs))
+    contract["local_engineering_review"] = {
+        "dax": {"status": dax_analysis["status"], "measure_count": dax_analysis["measure_count"], "valid_count": dax_analysis["valid_count"], "external_execution_required": dax_analysis["external_execution_required"]},
+        "power_query": {"status": power_query_analysis["status"], "features": power_query_analysis["features"], "external_execution_required": power_query_analysis["external_execution_required"]},
+    }
+    entries["model_contract.json"] = _json_bytes(contract)
+    entries["DAX_ANALYSIS.json"] = _json_bytes(dax_analysis)
+    entries["POWER_QUERY_ANALYSIS.json"] = _json_bytes(power_query_analysis)
     blueprint = enterprise_bi_blueprint(dataset_name=str(report.get("title") or "Generated Semantic Model"), source_rows=max(500_000_000, int(len(modeled))))
     entries["ENTERPRISE_ARCHITECTURE.md"] = enterprise_bi_markdown(blueprint)
     entries["enterprise_blueprint.json"] = _json_bytes({key: value for key, value in blueprint.items() if key != "files"})

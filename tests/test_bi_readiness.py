@@ -26,6 +26,8 @@ def test_bi_readiness_profile_and_preview_are_explainable(client):
     assert "order_date" in body["date_columns"]
     assert body["model_contract"]["model_type"] == "star_schema"
     assert body["model_contract"]["fact_table"]["grain"] == "one row per BI-ready source record"
+    assert body["advanced_model_contract"]["validation"]["status"] == "REVIEW_REQUIRED"
+    assert body["advanced_model_contract"]["validation"]["checks"]["fact_grain_declared"] is True
     assert any(item["code"] == "DUPLICATE_ROWS_REVIEW" for item in body["blockers"])
 
     preview = client.post(f"/api/v1/datasets/{dataset_id}/bi-readiness/preview", json={"options": {"remove_exact_duplicates": True}})
