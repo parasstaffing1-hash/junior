@@ -42,6 +42,7 @@ class DatasetVersion(Base):
     sha256 = Column(String, nullable=False)
     row_count = Column(Integer, nullable=False)
     column_count = Column(Integer, nullable=False)
+    metadata_json = Column("metadata", JSON, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     
     dataset = relationship("Dataset", back_populates="versions")
@@ -153,10 +154,11 @@ class WorkspaceAsset(Base):
 
     __tablename__ = "workspace_assets"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "asset_type", "name", name="uq_workspace_asset_name"),
+        UniqueConstraint("tenant_id", "workspace_id", "asset_type", "name", name="uq_workspace_asset_name"),
     )
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     workspace_id = Column(String, nullable=False, default="default", index=True)
     asset_type = Column(String, nullable=False, index=True)
     name = Column(String, nullable=False)
@@ -176,7 +178,7 @@ class RegisteredModel(Base):
 
     __tablename__ = "registered_models"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_registered_model_workspace_name"),
+        UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_registered_model_workspace_name"),
         CheckConstraint(
             "status IN ('CANDIDATE','VALIDATED','APPROVED','CHAMPION','ARCHIVED','REJECTED')",
             name="ck_registered_model_status",
@@ -184,6 +186,7 @@ class RegisteredModel(Base):
     )
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     workspace_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, nullable=False)
     task_type = Column(String, nullable=False)
@@ -233,9 +236,10 @@ class Experiment(Base):
     """Logical experiment grouping comparable, reproducible runs."""
 
     __tablename__ = "experiments"
-    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_experiment_workspace_name"),)
+    __table_args__ = (UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_experiment_workspace_name"),)
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     workspace_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, nullable=False)
     objective = Column(Text, nullable=True)
@@ -469,3 +473,58 @@ class JobSchedule(Base):
     last_run_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class IngestionState(Base):
+    """Durable checkpoint for governed full and watermark-incremental loads."""
+
+    __tablename__ = "ingestion_states"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "connection_ref", "source_object", name="uq_ingestion_state_source"),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    connection_ref = Column(String, nullable=False)
+    source_object = Column(String, nullable=False)
+    dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False, index=True)
+    last_watermark = Column(JSON, nullable=True)
+    last_version_id = Column(String, ForeignKey("dataset_versions.id"), nullable=True)
+    last_fingerprint = Column(String, nullable=True)
+    source_schema = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class AlertRule(Base):
+    """Tenant-scoped deterministic KPI/monitoring alert definition."""
+
+    __tablename__ = "alert_rules"
+    __table_args__ = (UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_alert_rule_scope_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, default="default", index=True)
+    name = Column(String, nullable=False)
+    definition = Column(JSON, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class AlertDelivery(Base):
+    """Audited delivery attempt for a triggered alert."""
+
+    __tablename__ = "alert_deliveries"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    rule_id = Column(String, ForeignKey("alert_rules.id"), nullable=True, index=True)
+    source_type = Column(String, nullable=False)
+    source_id = Column(String, nullable=True, index=True)
+    severity = Column(String, nullable=False, default="warning")
+    channel = Column(String, nullable=False)
+    status = Column(String, nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+    response = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    delivered_at = Column(DateTime, nullable=True)

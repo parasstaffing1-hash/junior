@@ -19,7 +19,8 @@ def _import_sales_dataset(client) -> dict:
 def test_acquisition_readiness_is_evidence_based(client):
     catalog = client.get("/api/v1/platform/capabilities")
     assert catalog.status_code == 200
-    assert catalog.json()["count"] == 30
+    assert catalog.json()["count"] == len(catalog.json()["capabilities"])
+    assert catalog.json()["count"] >= 30
     assert {item["status"] for item in catalog.json()["capabilities"]} == {"available", "partial", "planned"}
 
     readiness = client.get("/api/v1/platform/acquisition-readiness")

@@ -34,6 +34,8 @@ storage/**/*.part
 /artifacts/
 /dist/
 /backups/
+/dbt/target/
+/dbt/dbt_packages/
 
 # Local input data used for manual testing
 /enterprise_retail_sales.csv

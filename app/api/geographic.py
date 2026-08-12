@@ -27,6 +27,7 @@ from app.core.geographic import (
     validate_feature_collection,
 )
 from app.core.intelligence.common import ExecutionBudget, bounded_frame
+from app.core.security import SecurityError, assert_dataset_tenant, authorize
 from app.models.all import Dataset, DatasetVersion, GeographicBoundary, GeographicMapping, WorkspaceAsset
 
 
@@ -576,14 +577,18 @@ def build_territory(request: Request, payload: dict[str, Any]):
 
 
 def _public_saved_map(asset: WorkspaceAsset) -> dict[str, Any]:
-    return {"id": asset.id, "workspace_id": asset.workspace_id, "name": asset.name, "description": asset.description, "dataset_id": asset.dataset_id, "configuration": asset.definition_json, "status": asset.status, "version": asset.version, "updated_at": asset.updated_at.isoformat() if asset.updated_at else None}
+    return {"id": asset.id, "tenant_id": asset.tenant_id, "workspace_id": asset.workspace_id, "name": asset.name, "description": asset.description, "dataset_id": asset.dataset_id, "configuration": asset.definition_json, "status": asset.status, "version": asset.version, "updated_at": asset.updated_at.isoformat() if asset.updated_at else None}
 
 
 @router.get("/geographic/saved-maps")
 def list_saved_maps(request: Request, workspace_id: str = "default"):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+    authorize(actor, "read", workspace_id=workspace_id)
     db = request.app.state.SessionLocal()
     try:
-        items = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type == "geographic_map").order_by(WorkspaceAsset.updated_at.desc()).all()
+        items = db.query(WorkspaceAsset).filter(WorkspaceAsset.tenant_id == actor.tenant_id, WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type == "geographic_map").order_by(WorkspaceAsset.updated_at.desc()).all()
         return {"workspace_id": workspace_id, "maps": [_public_saved_map(item) for item in items]}
     finally:
         db.close()
@@ -591,6 +596,9 @@ def list_saved_maps(request: Request, workspace_id: str = "default"):
 
 @router.post("/geographic/saved-maps", status_code=201)
 def save_map(request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
     name = str(payload.get("name") or "").strip()
     dataset_id = str(payload.get("dataset_id") or "").strip()
     configuration = payload.get("configuration")
@@ -598,12 +606,13 @@ def save_map(request: Request, payload: dict[str, Any]):
         raise GeographicError("MAP_FIELDS_REQUIRED", "name, dataset_id, and a map configuration are required.")
     db = request.app.state.SessionLocal()
     try:
-        if db.query(Dataset).filter(Dataset.id == dataset_id).first() is None:
+        if db.query(Dataset).filter(Dataset.id == dataset_id, Dataset.tenant_id == actor.tenant_id).first() is None:
             raise GeographicError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404)
         workspace_id = str(payload.get("workspace_id") or "default")
-        asset = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type == "geographic_map", WorkspaceAsset.name == name).first()
+        authorize(actor, "write", workspace_id=workspace_id)
+        asset = db.query(WorkspaceAsset).filter(WorkspaceAsset.tenant_id == actor.tenant_id, WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type == "geographic_map", WorkspaceAsset.name == name).first()
         if asset is None:
-            asset = WorkspaceAsset(workspace_id=workspace_id, asset_type="geographic_map", name=name, dataset_id=dataset_id, definition_json={}, status="draft")
+            asset = WorkspaceAsset(tenant_id=actor.tenant_id, workspace_id=workspace_id, asset_type="geographic_map", name=name, dataset_id=dataset_id, definition_json={}, status="draft")
             db.add(asset)
         else:
             asset.version += 1

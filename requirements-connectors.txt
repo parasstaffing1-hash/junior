@@ -1,0 +1,8 @@
+# Optional live warehouse connector drivers.
+# Install only the drivers required by the deployment and install the matching
+# system ODBC driver for SQL Server where applicable. The core image remains
+# portable and does not claim these external systems are available locally.
+sqlalchemy-bigquery>=1.15,<2
+snowflake-sqlalchemy>=1.7,<2
+pyodbc>=5,<6
+google-cloud-bigquery>=3.25,<4

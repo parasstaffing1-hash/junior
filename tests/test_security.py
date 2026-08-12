@@ -46,3 +46,20 @@ def test_api_key_authentication_tenant_isolation_and_audit(monkeypatch, tmp_path
         assert audit.status_code == 200
         assert audit.json()["events"]
     app.state.engine.dispose()
+
+
+def test_workspace_assets_are_tenant_scoped(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AUTH_MODE", "api_key")
+    monkeypatch.setenv("ADMIN_API_KEY", "bootstrap-secret")
+    app = create_app(database_url="sqlite:///" + str(tmp_path / "workspace-security.db"), storage_root=tmp_path / "storage")
+    with TestClient(app) as client:
+        headers_a = {"X-API-Key": "bootstrap-secret", "X-Tenant-ID": "tenant-a"}
+        headers_b = {"X-API-Key": "bootstrap-secret", "X-Tenant-ID": "tenant-b"}
+        created = client.post("/api/v1/workspaces/finance/assets", headers=headers_a, json={"asset_type": "kpi", "name": "Revenue", "definition": {"expression": "SUM(Sales)"}})
+        assert created.status_code == 201, created.text
+        asset_id = created.json()["id"]
+        assert client.get("/api/v1/workspaces/finance/assets", headers=headers_b).json()["count"] == 0
+        assert client.get(f"/api/v1/workspaces/finance/assets/{asset_id}", headers=headers_b).status_code == 404
+        assert client.post(f"/api/v1/workspaces/finance/assets/{asset_id}/publish", headers=headers_b).status_code == 404
+    app.state.engine.dispose()

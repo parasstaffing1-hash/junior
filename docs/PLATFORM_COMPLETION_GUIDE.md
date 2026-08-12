@@ -4,16 +4,26 @@ Source: the layer-by-layer audit of this repository (7 layers, 28 capabilities).
 sequences the remaining work so each phase unblocks the next. Every step lists the exact
 files to touch, dependencies to add, tests to write, and the audit status it flips.
 
-**Current state (audited):**
+**Current state (audited 2026-08-12):**
 
 - ✅ Present: auto dashboards + BI exports, EDA/profiling/leakage detection, experiment
-  tracking with comparison, model registry with enforced training-data lineage.
-- 🟡 Partial: connectors (file-only), schema-drift/contract/CDC (advisory only),
-  orchestration (no scheduler), DQ rules (hardcoded), semantic layer, metric alerts,
-  feature store (definitions only), AutoML (grid only), serving, retrain/rollback
-  (decision-only), lineage (table-level), incident diagnosis (caller-supplied signals).
-- ❌ Missing: streaming, lakehouse, self-healing retries, NL-to-SQL, authN/Z + RBAC + PII,
-  cost tracking, model CI/CD.
+  tracking, governed metric queries, tenant/RBAC/API-key controls, PII profiling,
+  durable workers/retries/schedules, audited alert delivery, deterministic NL-to-SQL,
+  secret-reference database/API ingestion, watermark checkpoints, contract rejection,
+  feature-set materialization/lookup, approved-model serving, rollback approvals,
+  dependency graphs, cost evidence, and enforced training-data lineage.
+- 🟡 Partial: engine-specific warehouse drivers, log-based CDC, streaming, external
+  identity/Power BI/Fabric/Tableau operation, automatic metric discovery for scheduled
+  monitoring, full collaboration, and enterprise tracing/capacity telemetry.
+- ❌ Gated by deployment or external infrastructure: HA/multi-replica scale, managed
+  PostgreSQL/object storage, Entra/SCIM, Power BI/Fabric tenants, gateways, lakehouse
+  federation, and billion-row throughput certification.
+
+The phase-by-phase checklist and tracking matrix below is the original audit plan.
+Several phases are now implemented; use `app/core/enterprise/readiness.py`, the
+capability API, and the production runbook as the current source of truth. The
+remaining phase text is retained as an implementation and external-acceptance
+checklist, not as a claim that completed items are still missing.
 
 **Build order rationale:** security first (nothing is multi-user safe without it), then the
 execution backbone (scheduler + retries) because ~10 "advisory only" capabilities are
@@ -30,8 +40,8 @@ last — they are the largest effort and nothing else depends on them.
    implementation. The platform reports readiness from evidence — keep that honest.
 3. Every new write path must record lineage (`source_version_id`) and an `AuditEvent`,
    matching existing behavior.
-4. Run `.\venv\Scripts\python.exe -m pytest -q` before closing any phase. 172 tests must
-   stay green.
+4. Run `python -m pytest -q` before closing any phase. The repository suite must stay
+   green.
 
 ---
 

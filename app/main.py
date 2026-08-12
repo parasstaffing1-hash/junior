@@ -22,10 +22,10 @@ from datetime import datetime, timezone
 
 from app.core.database import Base, SessionLocal, build_database, engine, ensure_additive_local_schema
 from app.core.config import load_settings
-from app.core.security import Actor, RateLimiter, SecurityError, assert_dataset_tenant, authenticate, audit_request
+from app.core.security import Actor, RateLimiter, SecurityError, assert_dataset_tenant, authenticate, audit_request, authorize
 from app.core.security_policy import apply_row_policies, visible_columns
 from app.core.observability import MetricsRegistry
-from app.core.lineage import build_column_lineage
+from app.core.lineage import build_column_lineage, build_dependency_graph
 from app.core.enterprise.production_readiness import production_readiness
 from app.core.automation.gateway import action_catalog, dispatch_plan
 from app.core.cleaning.recipe_engine import execute_recipe
@@ -63,7 +63,7 @@ from app.core.sql.workbench import (
 from app.core.transformation.pipeline import execute_pipeline
 from app.core.visualization.recommender import recommend_charts
 from app.errors import AppError
-from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset, GeographicBoundary, SecurityPolicy
+from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset, GeographicBoundary, SecurityPolicy, PipelineRun, ModelVersion
 from app.orchestration.automated_analyst import AutomatedAnalyst
 from app.orchestration.platform import (
     PlatformAnalysisError,
@@ -78,6 +78,7 @@ from app.orchestration.platform import (
 from app.core.intake.importer import DatasetImporter
 from app.core.intelligence.common import IntelligenceError, bounded_frame
 from app.core.jobs.queue import DurableJobQueue
+from app.core.alerts.service import evaluate_and_deliver
 from app.api.intelligence import router as intelligence_router
 from app.api.geographic import router as geographic_router
 from app.api.conversation import router as conversation_router
@@ -88,6 +89,10 @@ from app.api.connectors import router as connectors_router
 from app.api.metrics import router as metrics_router
 from app.api.integrations import router as integrations_router
 from app.api.storage import router as storage_router
+from app.api.ingestion import router as ingestion_router
+from app.api.alerts import router as alerts_router
+from app.api.sql_intelligence import router as sql_intelligence_router
+from app.api.catalog import router as catalog_router
 from app.core.bi.report_service import build_bi_report
 from app.core.bi.export_formats import INTERACTIVE_EXPORT_FORMATS, resolve_export_formats
 from app.core.projects.catalog import FLAGSHIP_PROJECT_IDS, get_project_spec, list_flagship_project_specs, list_project_specs
@@ -638,9 +643,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             raise AppError("PROJECT_NOT_FOUND", "The requested portfolio project does not exist.", status_code=404, details={"project_id": project_id}) from exc
 
     def load_dataset_frame(dataset_id: str, request: Request, db: Session, version_id: str | None = None):
+        request_actor = getattr(request.state, "actor", None)
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
             raise PlatformAnalysisError("DATASET_NOT_FOUND", "Dataset was not found.", {"dataset_id": dataset_id})
+        if request_actor is not None:
+            assert_dataset_tenant(db, dataset_id, request_actor)
         selected_version_id = version_id or dataset.current_version_id
         version = db.query(DatasetVersion).filter(DatasetVersion.id == selected_version_id, DatasetVersion.dataset_id == dataset_id).first()
         if version is None:
@@ -649,7 +657,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
         except pd.errors.EmptyDataError:
             frame = pd.DataFrame()
-        actor = getattr(request.state, "actor", Actor("development", dataset.tenant_id, frozenset({"admin"}), frozenset({"*"}), frozenset({"*"})))
+        actor = request_actor or Actor("development", dataset.tenant_id, frozenset({"admin"}), frozenset({"*"}), frozenset({"*"}))
         policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == actor.tenant_id, SecurityPolicy.workspace_id == "default").all()
         frame, _ = apply_row_policies(frame, policies, actor)
         frame, _ = visible_columns(frame, policies)
@@ -658,6 +666,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     def public_workspace_asset(asset: WorkspaceAsset) -> dict[str, Any]:
         return {
             "id": asset.id,
+            "tenant_id": asset.tenant_id,
             "workspace_id": asset.workspace_id,
             "asset_type": asset.asset_type,
             "name": asset.name,
@@ -672,11 +681,21 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             "updated_at": asset.updated_at,
         }
 
-    def get_workspace_asset_or_404(workspace_id: str, asset_id: str, db: Session) -> WorkspaceAsset:
-        asset = db.query(WorkspaceAsset).filter(
+    def workspace_actor(request: Request, workspace_id: str, permission: str):
+        actor = getattr(request.state, "actor", None)
+        if actor is None:
+            raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+        authorize(actor, permission, workspace_id=workspace_id)
+        return actor
+
+    def get_workspace_asset_or_404(workspace_id: str, asset_id: str, db: Session, *, tenant_id: str | None = None) -> WorkspaceAsset:
+        query = db.query(WorkspaceAsset).filter(
             WorkspaceAsset.workspace_id == workspace_id,
             WorkspaceAsset.id == asset_id,
-        ).first()
+        )
+        if tenant_id is not None:
+            query = query.filter(WorkspaceAsset.tenant_id == tenant_id)
+        asset = query.first()
         if asset is None:
             raise AppError(
                 "WORKSPACE_ASSET_NOT_FOUND",
@@ -723,6 +742,50 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.get("/api/v1/platform/production-readiness")
     def platform_production_readiness(request: Request):
         return production_readiness(request.app.state.settings)
+
+    @app.get("/api/v1/platform/cost-report")
+    def platform_cost_report(request: Request, dataset_id: str | None = None):
+        actor = getattr(request.state, "actor", None)
+        db = request.app.state.SessionLocal()
+        try:
+            dataset_query = db.query(Dataset)
+            if actor is not None:
+                dataset_query = dataset_query.filter(Dataset.tenant_id == actor.tenant_id)
+            if dataset_id:
+                dataset_query = dataset_query.filter(Dataset.id == dataset_id)
+            datasets = dataset_query.all()
+            allowed_ids = {row.id for row in datasets}
+            if dataset_id and dataset_id not in allowed_ids:
+                raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
+            analyses = db.query(AnalysisRun).filter(AnalysisRun.dataset_id.in_(allowed_ids)).all() if allowed_ids else []
+            jobs = db.query(AutomationRun).filter(AutomationRun.dataset_id.in_(allowed_ids)).all() if allowed_ids else []
+            by_dataset: dict[str, dict[str, Any]] = {}
+            total_rows = 0
+            total_ms = 0.0
+            def add(dataset_key: str, operation: str, result: Any, status: str = "COMPLETED") -> None:
+                nonlocal total_rows, total_ms
+                if not isinstance(result, dict):
+                    return
+                execution = result.get("execution") if isinstance(result.get("execution"), dict) else result
+                rows = int(execution.get("rows_scanned", 0) or 0)
+                milliseconds = float(execution.get("execution_ms", 0) or 0)
+                total_rows += rows
+                total_ms += milliseconds
+                bucket = by_dataset.setdefault(dataset_key, {"rows_scanned": 0, "compute_ms": 0.0, "operations": []})
+                bucket["rows_scanned"] += rows
+                bucket["compute_ms"] += milliseconds
+                bucket["operations"].append({"operation": operation, "status": status, "rows_scanned": rows, "compute_ms": milliseconds})
+            for analysis in analyses:
+                add(analysis.dataset_id, analysis.engine, analysis.result)
+            for job in jobs:
+                add(job.dataset_id, job.action, job.result, job.status)
+            unit_cost = float(os.getenv("COST_PER_COMPUTE_SECOND", "0"))
+            for bucket in by_dataset.values():
+                bucket["compute_seconds"] = round(bucket["compute_ms"] / 1000, 3)
+                bucket["estimated_cost"] = round(bucket["compute_ms"] / 1000 * unit_cost, 6)
+            return {"tenant_id": actor.tenant_id if actor is not None else "default", "dataset_id": dataset_id, "cost_per_compute_second": unit_cost, "totals": {"rows_scanned": total_rows, "compute_ms": round(total_ms, 3), "compute_seconds": round(total_ms / 1000, 3), "estimated_cost": round(total_ms / 1000 * unit_cost, 6)}, "datasets": by_dataset, "currency": os.getenv("COST_CURRENCY", "compute_units" if unit_cost == 0 else "configured_currency")}
+        finally:
+            db.close()
 
     @app.get("/api/v1/platform/professional-capabilities")
     def platform_professional_capabilities():
@@ -855,11 +918,13 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.get("/api/v1/workspaces/{workspace_id}/assets")
     def list_workspace_assets(
         workspace_id: str,
+        request: Request,
         asset_type: Optional[str] = Query(None),
         status: Optional[str] = Query(None),
         db: Session = Depends(get_db),
     ):
-        query = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id)
+        actor = workspace_actor(request, workspace_id, "read")
+        query = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.tenant_id == actor.tenant_id)
         if asset_type:
             query = query.filter(WorkspaceAsset.asset_type == asset_type.casefold())
         if status:
@@ -868,14 +933,16 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return {"workspace_id": workspace_id, "count": len(assets), "assets": [public_workspace_asset(asset) for asset in assets]}
 
     @app.post("/api/v1/workspaces/{workspace_id}/assets", status_code=201)
-    def create_workspace_asset(workspace_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
+    def create_workspace_asset(workspace_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "write")
         normalized = validate_workspace_asset_payload(payload)
         if normalized["status"] == "published":
             raise WorkspaceValidationError("Use the publish endpoint to publish a governed asset.")
         dataset_id = payload.get("dataset_id")
-        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id)).first() is None:
+        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id), Dataset.tenant_id == actor.tenant_id).first() is None:
             raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
         asset = WorkspaceAsset(
+            tenant_id=actor.tenant_id,
             workspace_id=workspace_id,
             asset_type=normalized["asset_type"],
             name=normalized["name"],
@@ -901,17 +968,19 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return public_workspace_asset(asset)
 
     @app.get("/api/v1/workspaces/{workspace_id}/assets/{asset_id}")
-    def get_workspace_asset(workspace_id: str, asset_id: str, db: Session = Depends(get_db)):
-        return public_workspace_asset(get_workspace_asset_or_404(workspace_id, asset_id, db))
+    def get_workspace_asset(workspace_id: str, asset_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "read")
+        return public_workspace_asset(get_workspace_asset_or_404(workspace_id, asset_id, db, tenant_id=actor.tenant_id))
 
     @app.put("/api/v1/workspaces/{workspace_id}/assets/{asset_id}")
-    def update_workspace_asset(workspace_id: str, asset_id: str, payload: dict[str, Any], db: Session = Depends(get_db)):
-        asset = get_workspace_asset_or_404(workspace_id, asset_id, db)
+    def update_workspace_asset(workspace_id: str, asset_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "write")
+        asset = get_workspace_asset_or_404(workspace_id, asset_id, db, tenant_id=actor.tenant_id)
         normalized = validate_workspace_asset_payload(payload, existing=asset)
         if normalized["status"] == "published" and asset.status != "published":
             raise WorkspaceValidationError("Use the publish endpoint to publish a governed asset.")
         dataset_id = payload.get("dataset_id", asset.dataset_id)
-        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id)).first() is None:
+        if dataset_id and db.query(Dataset).filter(Dataset.id == str(dataset_id), Dataset.tenant_id == actor.tenant_id).first() is None:
             raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
         governed_content_changed = any((
             normalized["asset_type"] != asset.asset_type,
@@ -937,10 +1006,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return public_workspace_asset(asset)
 
     @app.post("/api/v1/workspaces/{workspace_id}/assets/{asset_id}/publish")
-    def publish_workspace_asset(workspace_id: str, asset_id: str, db: Session = Depends(get_db)):
-        asset = get_workspace_asset_or_404(workspace_id, asset_id, db)
+    def publish_workspace_asset(workspace_id: str, asset_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "deploy")
+        asset = get_workspace_asset_or_404(workspace_id, asset_id, db, tenant_id=actor.tenant_id)
         validate_asset_definition(asset.asset_type, asset.definition_json)
-        workspace_assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).all()
+        workspace_assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.tenant_id == actor.tenant_id).all()
         validation = validate_workspace_assets(workspace_assets)
         target_errors = [item for item in validation["unresolved_dependencies"] if item["asset_id"] == asset.id]
         if target_errors:
@@ -963,14 +1033,15 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return {"asset": public_workspace_asset(asset), "validation": validation}
 
     @app.get("/api/v1/workspaces/{workspace_id}/lineage")
-    def get_workspace_lineage(workspace_id: str, db: Session = Depends(get_db)):
-        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).order_by(WorkspaceAsset.created_at.asc()).all()
+    def get_workspace_lineage(workspace_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "read")
+        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.tenant_id == actor.tenant_id).order_by(WorkspaceAsset.created_at.asc()).all()
         nodes = [
             {"id": asset.id, "kind": "asset", "asset_type": asset.asset_type, "name": asset.name, "status": asset.status}
             for asset in assets
         ]
         dataset_ids = sorted({asset.dataset_id for asset in assets if asset.dataset_id})
-        datasets = db.query(Dataset).filter(Dataset.id.in_(dataset_ids)).all() if dataset_ids else []
+        datasets = db.query(Dataset).filter(Dataset.id.in_(dataset_ids), Dataset.tenant_id == actor.tenant_id).all() if dataset_ids else []
         nodes.extend({"id": item.id, "kind": "dataset", "name": item.name} for item in datasets)
         edges = []
         for asset in assets:
@@ -981,8 +1052,9 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return {"workspace_id": workspace_id, "nodes": nodes, "edges": edges, "validation": validate_workspace_assets(assets)}
 
     @app.post("/api/v1/workspaces/{workspace_id}/validate")
-    def validate_workspace(workspace_id: str, db: Session = Depends(get_db)):
-        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id).all()
+    def validate_workspace(workspace_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = workspace_actor(request, workspace_id, "read")
+        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.tenant_id == actor.tenant_id).all()
         return {"workspace_id": workspace_id, **validate_workspace_assets(assets)}
 
     def public_project_result(result: dict[str, Any], *, project_id: str) -> dict[str, Any]:
@@ -1151,8 +1223,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return Response(content=request.app.state.metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
 
     @app.get("/api/v1/datasets")
-    def list_datasets(db: Session = Depends(get_db)):
-        datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).all()
+    def list_datasets(request: Request, db: Session = Depends(get_db)):
+        actor = getattr(request.state, "actor", None)
+        query = db.query(Dataset)
+        if actor is not None:
+            query = query.filter(Dataset.tenant_id == actor.tenant_id)
+        datasets = query.order_by(Dataset.created_at.desc()).all()
         results = []
         for dataset in datasets:
             version = db.query(DatasetVersion).filter(DatasetVersion.id == dataset.current_version_id).first()
@@ -1195,16 +1271,9 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         limit: int = Query(50, ge=0, le=500),
         db: Session = Depends(get_db),
     ):
-        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-        if dataset is None:
-            raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
-        version = db.query(DatasetVersion).filter(DatasetVersion.id == dataset.current_version_id).first()
-        if version is None:
-            raise AppError("VERSION_NOT_FOUND", "Dataset has no current version.", status_code=404, details={"dataset_id": dataset_id})
-        storage = request.app.state.storage
-        path = storage.resolve(version.storage_path)
+        dataset, version, secure_frame = load_dataset_frame(dataset_id, request, db)
         try:
-            frame = pd.read_csv(path, skiprows=range(1, offset + 1), nrows=limit if limit else 0)
+            frame = secure_frame.iloc[offset: offset + limit if limit else offset].copy()
             # Cast to object first; otherwise pandas keeps float columns as NaN
             # and Starlette correctly rejects NaN as invalid JSON.
             frame = frame.astype(object).where(pd.notna(frame), None)
@@ -1219,21 +1288,16 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return {
             "dataset_id": dataset_id,
             "source_version_id": version.id,
-            "schema": {"row_count": version.row_count, "column_count": version.column_count, "columns": columns},
-            "preview": {"offset": offset, "limit": limit, "total_rows": version.row_count, "total_columns": version.column_count, "columns": columns, "rows": rows},
+            "schema": {"row_count": len(secure_frame), "column_count": len(columns), "columns": columns},
+            "preview": {"offset": offset, "limit": limit, "total_rows": len(secure_frame), "total_columns": len(columns), "columns": columns, "rows": rows},
             "health_score": health,
             "analysis_available": latest_run is not None,
         }
 
     @app.get("/api/v1/datasets/{dataset_id}/source")
     def download_dataset_source(dataset_id: str, request: Request, db: Session = Depends(get_db)):
-        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
-        if dataset is None:
-            raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
-        version = db.query(DatasetVersion).filter(DatasetVersion.id == dataset.current_version_id).first()
-        if version is None:
-            raise AppError("VERSION_NOT_FOUND", "Dataset has no current version.", status_code=404, details={"dataset_id": dataset_id})
-        return FileResponse(request.app.state.storage.resolve(version.storage_path), media_type="text/csv", filename=dataset.original_filename)
+        dataset, _, secure_frame = load_dataset_frame(dataset_id, request, db)
+        return Response(content=secure_frame.to_csv(index=False).encode("utf-8"), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{dataset.original_filename}"'})
 
     @app.post("/api/v1/datasets/{dataset_id}/automated_analyst")
     def run_automated_analyst(dataset_id: str, request: Request, db: Session = Depends(get_db)):
@@ -1482,6 +1546,22 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             "column_lineage": build_column_lineage(versions, audits, artifacts, request.app.state.storage),
         }
 
+    @app.get("/api/v1/datasets/{dataset_id}/dependency-graph")
+    def get_dataset_dependency_graph(dataset_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = getattr(request.state, "actor", None)
+        if actor is not None:
+            assert_dataset_tenant(db, dataset_id, actor)
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if dataset is None:
+            raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
+        versions = db.query(DatasetVersion).filter(DatasetVersion.dataset_id == dataset_id).order_by(DatasetVersion.version_number.asc()).all()
+        pipelines = db.query(PipelineRun).filter(PipelineRun.dataset_id == dataset_id).order_by(PipelineRun.started_at.asc()).all()
+        artifacts = db.query(Artifact).filter(Artifact.dataset_id == dataset_id).order_by(Artifact.created_at.asc()).all()
+        analyses = db.query(AnalysisRun).filter(AnalysisRun.dataset_id == dataset_id).order_by(AnalysisRun.created_at.asc()).all()
+        assets = db.query(WorkspaceAsset).filter(WorkspaceAsset.dataset_id == dataset_id).order_by(WorkspaceAsset.created_at.asc()).all()
+        model_versions = db.query(ModelVersion).filter(ModelVersion.training_dataset_id == dataset_id).order_by(ModelVersion.created_at.asc()).all()
+        return build_dependency_graph(dataset=dataset, versions=versions, pipelines=pipelines, artifacts=artifacts, analyses=analyses, assets=assets, model_versions=model_versions)
+
     @app.post("/api/v1/datasets/{dataset_id}/quality/analyze")
     def analyze_quality(dataset_id: str, payload: dict[str, Any] | None = None, request: Request = None, db: Session = Depends(get_db)):
         _, version, frame = load_dataset_frame(dataset_id, request, db, (payload or {}).get("version_id"))
@@ -1669,6 +1749,16 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 generate_report_file(action_payload, "pdf")
             elif action == "report.excel":
                 generate_report_file(action_payload, "xlsx")
+            elif action == "alert.evaluate":
+                run.result = evaluate_and_deliver(
+                    db,
+                    tenant_id=run.tenant_id or "default",
+                    snapshot=action_payload.get("snapshot") or action_payload,
+                    source_type=str(action_payload.get("source_type", "scheduled_metric_snapshot")),
+                    source_id=action_payload.get("source_id"),
+                    approved=bool(action_payload.get("approved", False) and str(run.tenant_id) != "default"),
+                    timeout_seconds=app.state.settings.request_timeout_seconds,
+                )
             else:
                 raise Exception(f"Action '{action}' is not supported in background execution.")
             
@@ -1791,6 +1881,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.include_router(metrics_router)
     app.include_router(integrations_router)
     app.include_router(storage_router)
+    app.include_router(ingestion_router)
+    app.include_router(alerts_router)
+    app.include_router(sql_intelligence_router)
+    app.include_router(catalog_router)
     app.include_router(connectors_router)
 
     return app

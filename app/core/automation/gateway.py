@@ -21,6 +21,7 @@ ACTIONS={
     "report.pdf":{"method":"POST","path":"/api/v1/pdf-reports/generate","requires":[]},
     "report.excel":{"method":"POST","path":"/api/v1/excel-reports/generate","requires":[]},
     "bi.report":{"method":"GET","path":"/api/v1/datasets/{dataset_id}/bi_report","requires":["dataset_id"]},
+    "alert.evaluate":{"method":"POST","path":"/api/v1/alerts/evaluate","requires":[]},
 }
 
 FINAL={"COMPLETED","FAILED","CANCELLED"}

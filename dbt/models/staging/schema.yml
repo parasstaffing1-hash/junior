@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: governed
+    description: "Tenant-scoped warehouse sources registered outside the application."
+    schema: governed
+    tables:
+      - name: raw_dataset
+        description: "Deployment-specific raw relation; preserve source_version_id for lineage."
+        columns:
+          - name: source_version_id
+            tests:
+              - not_null
+
+models:
+  - name: stg_dataset
+    description: "Minimal governed staging contract for downstream star-schema models."
+    columns:
+      - name: source_version_id
+        tests:
+          - not_null

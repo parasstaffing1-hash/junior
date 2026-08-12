@@ -20,7 +20,10 @@ from app.core.ml.unsupervised import UnsupervisedLearningService, UnsupervisedOu
 from app.core.mlops import MLOpsService
 from app.core.jobs.queue import DurableJobQueue
 from app.core.security import Actor
+from app.core.security import assert_dataset_tenant, authorize
 from app.core.security_policy import apply_row_policies, visible_columns
+from app.core.feature_store import materialize_features
+from app.core.incident import derive_incident_signals
 from app.models.all import (
     AnalysisRun,
     ApprovalRecord,
@@ -114,11 +117,11 @@ def _load_dataset(
         frame = pd.read_csv(path)
     except pd.errors.EmptyDataError:
         frame = pd.DataFrame()
-    if expected_tenant_id:
-        actor = Actor("durable-worker", expected_tenant_id, frozenset({"owner", "admin"}), frozenset({"*"}), frozenset({"*"}), "worker")
-        policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == expected_tenant_id, SecurityPolicy.workspace_id == "default").all()
-        frame, _ = apply_row_policies(frame, policies, actor)
-        frame, _ = visible_columns(frame, policies)
+    policy_tenant = expected_tenant_id or dataset.tenant_id
+    policy_actor = Actor("dataset-policy-engine", policy_tenant, frozenset({"owner", "admin"}), frozenset({"*"}), frozenset({"*"}), "policy_engine")
+    policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == policy_tenant, SecurityPolicy.workspace_id == "default").all()
+    frame, _ = apply_row_policies(frame, policies, policy_actor)
+    frame, _ = visible_columns(frame, policies)
     return dataset, version, frame
 
 
@@ -393,9 +396,10 @@ def ml_unsupervised(dataset_id: str, operation: str, request: Request, payload: 
 
 @router.get("/models")
 def list_models(request: Request, workspace_id: str = "default"):
+    actor = _model_actor(request, "read")
     db = request.app.state.SessionLocal()
     try:
-        models = db.query(RegisteredModel).filter(RegisteredModel.workspace_id == workspace_id).order_by(RegisteredModel.updated_at.desc()).all()
+        models = db.query(RegisteredModel).filter(RegisteredModel.tenant_id == actor.tenant_id, RegisteredModel.workspace_id == workspace_id).order_by(RegisteredModel.updated_at.desc()).all()
         return {"workspace_id": workspace_id, "models": [public_model(model) for model in models]}
     finally:
         db.close()
@@ -403,30 +407,100 @@ def list_models(request: Request, workspace_id: str = "default"):
 
 @router.get("/models/{model_id}")
 def get_model(model_id: str, request: Request):
+    actor = _model_actor(request, "read")
     db = request.app.state.SessionLocal()
     try:
         model = db.query(RegisteredModel).filter(RegisteredModel.id == model_id).first()
         if model is None:
             raise IntelligenceError("MODEL_NOT_FOUND", "Registered model was not found.", status_code=404)
+        _model_visible_to_tenant(db, model, actor)
         return public_model(model)
     finally:
         db.close()
 
 
-def _model_dataset(db: Session, storage: DatasetStorage, model_version_id: str, payload: dict[str, Any]):
+def _model_actor(request: Request, permission: str = "analyze") -> Actor:
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise IntelligenceError("AUTHENTICATION_REQUIRED", "A security principal is required.", status_code=401)
+    authorize(actor, permission)
+    return actor
+
+
+def _model_visible_to_tenant(db: Session, model: RegisteredModel, actor: Actor) -> None:
+    dataset_ids = {version.training_dataset_id for version in model.versions if version.training_dataset_id}
+    if model.tenant_id != actor.tenant_id or not dataset_ids or not db.query(Dataset.id).filter(Dataset.id.in_(dataset_ids), Dataset.tenant_id == actor.tenant_id).first():
+        raise IntelligenceError("TENANT_FORBIDDEN", "The model is not available to this tenant.", status_code=403)
+
+
+def _model_dataset(db: Session, storage: DatasetStorage, model_version_id: str, payload: dict[str, Any], actor: Actor | None = None):
     model, version, artifact = load_trusted_model(db, storage, model_version_id)
+    registered_model = db.query(RegisteredModel).filter(RegisteredModel.id == version.model_id).first()
+    if registered_model is None:
+        raise IntelligenceError("MODEL_NOT_FOUND", "The registered model was not found.", status_code=404)
+    if actor is not None:
+        _model_visible_to_tenant(db, registered_model, actor)
     dataset_id = str(payload.get("dataset_id") or version.training_dataset_id)
     source_version_id = payload.get("source_version_id") or (version.training_source_version_id if dataset_id == version.training_dataset_id else None)
-    dataset, source_version, frame = _load_dataset(db, storage, dataset_id, source_version_id)
+    dataset, source_version, frame = _load_dataset(db, storage, dataset_id, source_version_id, expected_tenant_id=actor.tenant_id if actor else None)
     compatibility = _compatible_frame(version, frame)
     return model, version, artifact, dataset, source_version, frame, compatibility
 
 
-@router.post("/models/{model_version_id}/diagnostics/{operation}")
-def model_diagnostics(model_version_id: str, operation: str, request: Request, payload: dict[str, Any]):
+@router.post("/models/{model_version_id}/predict")
+def predict_model(model_version_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
-        model, model_version, _, dataset, version, frame, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload)
+        model, model_version, artifact = load_trusted_model(db, request.app.state.storage, model_version_id)
+        if model_version.status not in {"APPROVED", "CHAMPION"}:
+            raise IntelligenceError("MODEL_NOT_APPROVED", "Only APPROVED or CHAMPION models can serve predictions.", {"status": model_version.status}, status_code=403)
+        training_dataset = assert_dataset_tenant(db, model_version.training_dataset_id, actor)
+        batch = False
+        source_version = None
+        if payload.get("dataset_id"):
+            dataset_id = str(payload["dataset_id"])
+            assert_dataset_tenant(db, dataset_id, actor)
+            model, model_version, artifact, dataset, source_version, frame, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, {"dataset_id": dataset_id, "source_version_id": payload.get("source_version_id")}, actor)
+            batch = True
+        else:
+            records = payload.get("records")
+            if isinstance(records, dict):
+                records = [records]
+            if not isinstance(records, list) or not records:
+                raise IntelligenceError("PREDICTION_INPUT_REQUIRED", "Provide records or dataset_id.", status_code=422)
+            frame = pd.DataFrame(records)
+            dataset = training_dataset
+            source_version = db.query(DatasetVersion).filter(DatasetVersion.id == model_version.training_source_version_id).first()
+            compatibility = _compatible_frame(model_version, frame)
+        features = [str(column) for column in (model_version.feature_specification or {}).get("features", [])]
+        predicted = model.predict(frame[features])
+        output = frame.copy()
+        output["prediction"] = predicted
+        if bool(payload.get("include_probabilities", False)) and hasattr(model, "predict_proba"):
+            probabilities = model.predict_proba(frame[features])
+            classes = list(model.named_steps["model"].classes_) if hasattr(model, "named_steps") and hasattr(model.named_steps.get("model"), "classes_") else list(range(probabilities.shape[1]))
+            for index, label in enumerate(classes):
+                output[f"probability_{label}"] = probabilities[:, index]
+        result = {"model_version_id": model_version.id, "model_status": model_version.status, "model_artifact_sha256": artifact.sha256, "training_dataset_id": model_version.training_dataset_id, "rows_scored": int(len(output)), "predictions": json_safe(output.astype(object).where(pd.notna(output), None).to_dict(orient="records")[:5000]), "truncated": len(output) > 5000, "compatibility": compatibility, "batch": batch}
+        if batch and source_version is not None:
+            prediction_artifact = _store_frame_artifact(db, request.app.state.storage, dataset=dataset, version=source_version, frame=output, artifact_type="model_predictions", metadata={"model_version_id": model_version.id, "source_version_id": source_version.id, "rows_scored": len(output)})
+            result["artifact"] = _public_artifact(prediction_artifact)
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@router.post("/models/{model_version_id}/diagnostics/{operation}")
+def model_diagnostics(model_version_id: str, operation: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
+    db = request.app.state.SessionLocal()
+    try:
+        model, model_version, _, dataset, version, frame, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload, actor)
         target = payload.get("target_column") or (model_version.feature_specification or {}).get("targets", [None])[0]
         parameters = {**payload, "target_column": target, "feature_columns": (model_version.feature_specification or {}).get("features"), "task_type": db.query(RegisteredModel).filter(RegisteredModel.id == model_version.model_id).first().task_type}
         result = _services(payload)["diagnostics"].run(model, frame, operation, **parameters)
@@ -443,9 +517,10 @@ def model_diagnostics(model_version_id: str, operation: str, request: Request, p
 
 @router.post("/models/{model_version_id}/explain")
 def explain_model(model_version_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
-        model, model_version, _, dataset, version, frame, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload)
+        model, model_version, _, dataset, version, frame, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload, actor)
         parameters = {**payload, "target_column": payload.get("target_column") or model_version.feature_specification["targets"][0], "feature_columns": model_version.feature_specification["features"]}
         result = _services(payload)["ml"].explain(model, frame, **parameters)
         result["compatibility"] = compatibility
@@ -461,9 +536,10 @@ def explain_model(model_version_id: str, request: Request, payload: dict[str, An
 
 @router.post("/models/{model_version_id}/thresholds")
 def model_thresholds(model_version_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
-        model, model_version, _, dataset, version, frame, _ = _model_dataset(db, request.app.state.storage, model_version_id, payload)
+        model, model_version, _, dataset, version, frame, _ = _model_dataset(db, request.app.state.storage, model_version_id, payload, actor)
         parameters = {**payload, "target_column": payload.get("target_column") or model_version.feature_specification["targets"][0], "feature_columns": model_version.feature_specification["features"], "task_type": "classification"}
         result = _services(payload)["ml"].threshold_analysis(model, frame, **parameters)
         run = _analysis(db, dataset=dataset, version=version, engine="ThresholdOptimizationService", internal_tool_id=140, parameters=parameters, result=result)
@@ -478,9 +554,10 @@ def model_thresholds(model_version_id: str, request: Request, payload: dict[str,
 
 @router.post("/models/{model_version_id}/calibration")
 def model_calibration(model_version_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
-        model, model_version, _, dataset, version, frame, _ = _model_dataset(db, request.app.state.storage, model_version_id, payload)
+        model, model_version, _, dataset, version, frame, _ = _model_dataset(db, request.app.state.storage, model_version_id, payload, actor)
         parameters = {**payload, "target_column": payload.get("target_column") or model_version.feature_specification["targets"][0], "feature_columns": model_version.feature_specification["features"], "task_type": "classification"}
         result = _services(payload)["ml"].calibration_analysis(model, frame, **parameters)
         run = _analysis(db, dataset=dataset, version=version, engine="CalibrationService", internal_tool_id=141, parameters=parameters, result=result)
@@ -495,9 +572,10 @@ def model_calibration(model_version_id: str, request: Request, payload: dict[str
 
 @router.post("/models/{model_version_id}/monitor/{operation}")
 def monitor_model(model_version_id: str, operation: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
-        model, model_version, _, current_dataset, current_version, current, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload)
+        model, model_version, _, current_dataset, current_version, current, compatibility = _model_dataset(db, request.app.state.storage, model_version_id, payload, actor)
         _, _, reference = _load_dataset(db, request.app.state.storage, model_version.training_dataset_id, payload.get("reference_version_id") or model_version.training_source_version_id)
         challenger = None
         if payload.get("challenger_model_version_id"):
@@ -545,11 +623,16 @@ def monitor_model(model_version_id: str, operation: str, request: Request, paylo
 
 @router.post("/models/{model_version_id}/status")
 def update_model_status(model_version_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request, "deploy")
     db = request.app.state.SessionLocal()
     try:
         version = db.query(ModelVersion).filter(ModelVersion.id == model_version_id).first()
         if version is None:
             raise IntelligenceError("MODEL_VERSION_NOT_FOUND", "Model version was not found.", status_code=404)
+        model = db.query(RegisteredModel).filter(RegisteredModel.id == version.model_id).first()
+        if model is None:
+            raise IntelligenceError("MODEL_NOT_FOUND", "Registered model was not found.", status_code=404)
+        _model_visible_to_tenant(db, model, actor)
         requested = str(payload.get("status", "")).upper()
         evidence = payload.get("evidence") or {}
         approved_by = payload.get("approved_by")
@@ -561,13 +644,52 @@ def update_model_status(model_version_id: str, request: Request, payload: dict[s
         record = ApprovalRecord(model_version_id=version.id, requested_status=requested, decision="APPROVED", approved_by=approved_by, evidence=json_safe(evidence), created_at=utc_now())
         db.add(record)
         if requested == "CHAMPION":
-            model = db.query(RegisteredModel).filter(RegisteredModel.id == version.model_id).first()
             for sibling in model.versions:
                 if sibling.id != version.id and sibling.status == "CHAMPION":
                     sibling.status = "ARCHIVED"
             model.status = "CHAMPION"
         db.commit()
         return {"model_version_id": version.id, "status": version.status, "approval_record_id": record.id, "approved_by": approved_by}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@router.post("/models/{model_id}/rollback")
+def rollback_model(model_id: str, request: Request, payload: dict[str, Any]):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise IntelligenceError("AUTHENTICATION_REQUIRED", "A security principal is required.", status_code=401)
+    authorize(actor, "deploy")
+    db = request.app.state.SessionLocal()
+    try:
+        model = db.query(RegisteredModel).filter(RegisteredModel.id == model_id).first()
+        if model is None:
+            raise IntelligenceError("MODEL_NOT_FOUND", "The registered model was not found.", status_code=404)
+        _model_visible_to_tenant(db, model, actor)
+        if not model.versions:
+            raise IntelligenceError("MODEL_VERSION_NOT_FOUND", "The registered model has no versions.", status_code=404)
+        dataset = db.query(Dataset).filter(Dataset.id == model.versions[0].training_dataset_id).first()
+        if dataset is None or dataset.tenant_id != actor.tenant_id:
+            raise IntelligenceError("TENANT_FORBIDDEN", "The model is not available to this tenant.", status_code=403)
+        target_id = str(payload.get("target_model_version_id") or "")
+        target_version_number = payload.get("target_version")
+        target = next((version for version in model.versions if (target_id and version.id == target_id) or (target_version_number is not None and int(version.version) == int(target_version_number))), None)
+        if target is None:
+            raise IntelligenceError("ROLLBACK_TARGET_NOT_FOUND", "A valid target model version is required.", status_code=422)
+        if target.status not in {"APPROVED", "ARCHIVED", "CHAMPION"}:
+            raise IntelligenceError("ROLLBACK_TARGET_NOT_APPROVED", "Rollback target must be APPROVED, ARCHIVED, or CHAMPION.", {"status": target.status}, status_code=422)
+        current = next((version for version in model.versions if version.status == "CHAMPION"), None)
+        if current is not None and current.id != target.id:
+            current.status = "ARCHIVED"
+        target.status = "CHAMPION"
+        model.status = "CHAMPION"
+        record = ApprovalRecord(model_version_id=target.id, requested_status="CHAMPION", decision="ROLLBACK", approved_by=actor.principal_id, evidence=json_safe({"reason": payload.get("reason"), "source_model_id": model.id, "previous_champion_id": current.id if current else None, "target_model_version_id": target.id}), created_at=utc_now())
+        db.add(record)
+        db.commit()
+        return {"model_id": model.id, "previous_champion_id": current.id if current else None, "target_model_version_id": target.id, "status": target.status, "approval_record_id": record.id, "decision": "ROLLBACK"}
     except Exception:
         db.rollback()
         raise
@@ -599,19 +721,48 @@ def run_orchestration(dataset_id: str, operation: str, request: Request, payload
     try:
         dataset, version, frame = _load_dataset(db, request.app.state.storage, dataset_id, payload.get("source_version_id"))
         orchestration_parameters = {key: value for key, value in payload.items() if key not in {"dataset_id", "source_version_id"}}
+        if operation == "incident_root_cause" and not orchestration_parameters.get("incident_signals"):
+            orchestration_parameters["incident_signals"] = derive_incident_signals(db, dataset_id=dataset.id)
         result = _services(payload)["orchestration"].run(frame, operation, dataset_id=dataset.id, source_version_id=version.id, **orchestration_parameters)
+        materialized_version_id = None
+        materialization_metadata = None
+        if operation == "feature_store" and bool(payload.get("materialize", False)):
+            key_columns = [str(column) for column in (payload.get("entity_columns") or [])]
+            missing_keys = [column for column in key_columns if column not in frame.columns]
+            if missing_keys:
+                raise IntelligenceError("FEATURE_ENTITY_COLUMNS_MISSING", "entity_columns must exist in the source dataset.", {"missing": missing_keys})
+            feature_frame, materialization_metadata = materialize_features(frame, result.get("features") or [])
+            output_frame = pd.concat([frame[key_columns].reset_index(drop=True), feature_frame], axis=1) if key_columns else feature_frame
+            imported = request.app.state.importer.import_dataframe(
+                db,
+                output_frame,
+                name=f"{dataset.name}_features",
+                source_type="feature_set",
+                tenant_id=getattr(getattr(request.state, "actor", None), "tenant_id", dataset.tenant_id),
+                dataset_id=dataset.id,
+                parent_version_id=version.id,
+                metadata={"feature_set": {"entity_columns": key_columns, **materialization_metadata}, "source_version_id": version.id},
+            )
+            materialized_version_id = imported["version_id"]
+            result["materialized_dataset_id"] = imported["dataset_id"]
+            result["materialized_version_id"] = materialized_version_id
+            result["materialization"] = {"entity_columns": key_columns, **materialization_metadata}
         if operation in {"feature_store", "data_product"}:
+            actor = getattr(request.state, "actor", None)
+            if actor is not None:
+                authorize(actor, "write", workspace_id=str(payload.get("workspace_id", "default")))
             asset_type = "feature_set" if operation == "feature_store" else "data_product"
             name = str(payload.get("feature_set_name") if operation == "feature_store" else payload.get("product_name") or result.get("product_name") or f"{dataset.name} {asset_type}")
-            definition = {"features": result.get("features", []), "lineage": {"dataset_id": dataset.id, "source_version_id": version.id}} if asset_type == "feature_set" else {"contract": result.get("contract"), "quality_policy": result.get("quality_policy"), "lineage": result.get("lineage")}
-            existing = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == str(payload.get("workspace_id", "default")), WorkspaceAsset.asset_type == asset_type, WorkspaceAsset.name == name).first()
+            definition = {"features": result.get("features", []), "entity_columns": payload.get("entity_columns") or [], "materialized_version_id": materialized_version_id, "lineage": {"dataset_id": dataset.id, "source_version_id": version.id}} if asset_type == "feature_set" else {"contract": result.get("contract"), "quality_policy": result.get("quality_policy"), "lineage": result.get("lineage")}
+            tenant_id = getattr(getattr(request.state, "actor", None), "tenant_id", dataset.tenant_id)
+            existing = db.query(WorkspaceAsset).filter(WorkspaceAsset.tenant_id == tenant_id, WorkspaceAsset.workspace_id == str(payload.get("workspace_id", "default")), WorkspaceAsset.asset_type == asset_type, WorkspaceAsset.name == name).first()
             if existing:
                 existing.definition_json = definition
                 existing.version += 1
                 existing.updated_at = utc_now()
                 asset = existing
             else:
-                asset = WorkspaceAsset(workspace_id=str(payload.get("workspace_id", "default")), asset_type=asset_type, name=name, description=payload.get("description"), dataset_id=dataset.id, definition_json=definition, status="validated", owner=payload.get("owner"), tags=payload.get("tags") or [], version=1, created_at=utc_now(), updated_at=utc_now())
+                asset = WorkspaceAsset(tenant_id=tenant_id, workspace_id=str(payload.get("workspace_id", "default")), asset_type=asset_type, name=name, description=payload.get("description"), dataset_id=dataset.id, definition_json=definition, status="validated", owner=payload.get("owner"), tags=payload.get("tags") or [], version=1, created_at=utc_now(), updated_at=utc_now())
                 db.add(asset)
             db.flush()
             result["workspace_asset_id"] = asset.id
@@ -632,15 +783,48 @@ def orchestrate_dataset(dataset_id: str, request: Request, payload: dict[str, An
     return run_orchestration(dataset_id, str(payload.pop("operation", "autonomous")), request, payload)
 
 
+@router.get("/feature-sets/{asset_id}/lookup")
+def feature_set_lookup(asset_id: str, request: Request, entity: str, key: str):
+    actor = getattr(request.state, "actor", None)
+    if actor is None:
+        raise IntelligenceError("AUTHENTICATION_REQUIRED", "A security principal is required.", status_code=401)
+    db = request.app.state.SessionLocal()
+    try:
+        asset = db.query(WorkspaceAsset).filter(WorkspaceAsset.id == asset_id, WorkspaceAsset.tenant_id == actor.tenant_id, WorkspaceAsset.asset_type == "feature_set", WorkspaceAsset.workspace_id == "default").first()
+        if asset is None:
+            raise IntelligenceError("FEATURE_SET_NOT_FOUND", "The feature set was not found.", status_code=404)
+        dataset = db.query(Dataset).filter(Dataset.id == asset.dataset_id, Dataset.tenant_id == actor.tenant_id).first()
+        if dataset is None:
+            raise IntelligenceError("TENANT_FORBIDDEN", "The feature set is not available to this tenant.", status_code=403)
+        definition = asset.definition_json or {}
+        entity_columns = [str(column) for column in definition.get("entity_columns") or []]
+        if entity not in entity_columns:
+            raise IntelligenceError("FEATURE_ENTITY_NOT_ALLOWED", "The requested entity column is not part of the feature-set contract.", {"entity": entity, "allowed": entity_columns})
+        version_id = definition.get("materialized_version_id")
+        if not version_id:
+            raise IntelligenceError("FEATURE_SET_NOT_MATERIALIZED", "Materialize the feature set before online lookup.", status_code=409)
+        version = db.query(DatasetVersion).filter(DatasetVersion.id == version_id, DatasetVersion.dataset_id == dataset.id).first()
+        if version is None:
+            raise IntelligenceError("FEATURE_VERSION_NOT_FOUND", "The materialized feature version was not found.", status_code=404)
+        frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
+        if entity not in frame.columns:
+            raise IntelligenceError("FEATURE_ENTITY_NOT_FOUND", "The materialized feature data does not contain the entity column.", status_code=500)
+        matches = frame[frame[entity].astype("string") == str(key)].head(100)
+        return {"asset_id": asset.id, "asset_version": asset.version, "dataset_id": dataset.id, "source_version_id": version.id, "entity": entity, "key": key, "rows": json_safe(matches.astype(object).where(pd.notna(matches), None).to_dict(orient="records")), "row_count": int(len(matches)), "training_serving_parity": True}
+    finally:
+        db.close()
+
+
 @router.post("/mlops/{operation}")
 def run_mlops(operation: str, request: Request, payload: dict[str, Any] | None = None):
     payload = payload or {}
+    actor = _model_actor(request)
     db = request.app.state.SessionLocal()
     try:
         frame = None
         dataset = version = None
         if payload.get("dataset_id"):
-            dataset, version, frame = _load_dataset(db, request.app.state.storage, str(payload["dataset_id"]), payload.get("source_version_id"))
+            dataset, version, frame = _load_dataset(db, request.app.state.storage, str(payload["dataset_id"]), payload.get("source_version_id"), expected_tenant_id=actor.tenant_id)
             payload = {**payload, "dataset_id": dataset.id, "source_version_id": version.id}
         result = _services(payload)["mlops"].run(operation, frame=frame, **payload)
         if dataset and version:
@@ -656,10 +840,13 @@ def run_mlops(operation: str, request: Request, payload: dict[str, Any] | None =
 
 @router.post("/experiments", status_code=201)
 def create_experiment(request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request, "write")
     db = request.app.state.SessionLocal()
     try:
-        dataset, _, _ = _load_dataset(db, request.app.state.storage, str(payload.get("dataset_id")), payload.get("source_version_id"))
-        experiment = Experiment(workspace_id=str(payload.get("workspace_id", "default")), name=str(payload.get("name", "")).strip(), objective=payload.get("objective"), dataset_id=dataset.id, status="ACTIVE", created_at=utc_now(), updated_at=utc_now())
+        dataset, _, _ = _load_dataset(db, request.app.state.storage, str(payload.get("dataset_id")), payload.get("source_version_id"), expected_tenant_id=actor.tenant_id)
+        workspace_id = str(payload.get("workspace_id", "default"))
+        authorize(actor, "write", workspace_id=workspace_id)
+        experiment = Experiment(tenant_id=dataset.tenant_id, workspace_id=workspace_id, name=str(payload.get("name", "")).strip(), objective=payload.get("objective"), dataset_id=dataset.id, status="ACTIVE", created_at=utc_now(), updated_at=utc_now())
         if not experiment.name:
             raise IntelligenceError("EXPERIMENT_NAME_REQUIRED", "Experiment name is required.")
         db.add(experiment)
@@ -674,9 +861,10 @@ def create_experiment(request: Request, payload: dict[str, Any]):
 
 @router.get("/experiments")
 def list_experiments(request: Request, workspace_id: str = "default"):
+    actor = _model_actor(request, "read")
     db = request.app.state.SessionLocal()
     try:
-        experiments = db.query(Experiment).filter(Experiment.workspace_id == workspace_id).order_by(Experiment.updated_at.desc()).all()
+        experiments = db.query(Experiment).filter(Experiment.tenant_id == actor.tenant_id, Experiment.workspace_id == workspace_id).order_by(Experiment.updated_at.desc()).all()
         return {"workspace_id": workspace_id, "experiments": [{"id": item.id, "name": item.name, "objective": item.objective, "dataset_id": item.dataset_id, "status": item.status, "run_count": len(item.runs)} for item in experiments]}
     finally:
         db.close()
@@ -684,13 +872,18 @@ def list_experiments(request: Request, workspace_id: str = "default"):
 
 @router.post("/experiments/{experiment_id}/runs", status_code=201)
 def create_experiment_run(experiment_id: str, request: Request, payload: dict[str, Any]):
+    actor = _model_actor(request, "write")
     db = request.app.state.SessionLocal()
     try:
-        experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+        experiment = db.query(Experiment).filter(Experiment.id == experiment_id, Experiment.tenant_id == actor.tenant_id).first()
         if experiment is None:
             raise IntelligenceError("EXPERIMENT_NOT_FOUND", "Experiment was not found.", status_code=404)
         model_version_id = payload.get("model_version_id")
         model_version = db.query(ModelVersion).filter(ModelVersion.id == model_version_id).first() if model_version_id else None
+        if model_version:
+            model = db.query(RegisteredModel).filter(RegisteredModel.id == model_version.model_id, RegisteredModel.tenant_id == actor.tenant_id).first()
+            if model is None:
+                raise IntelligenceError("TENANT_FORBIDDEN", "The model is not available to this tenant.", status_code=403)
         if model_version and model_version.training_dataset_id != experiment.dataset_id:
             raise IntelligenceError("EXPERIMENT_LINEAGE_MISMATCH", "Model version was trained on a different dataset.")
         run = ExperimentRun(experiment_id=experiment.id, analysis_run_id=payload.get("analysis_run_id"), model_version_id=model_version_id, parameters=json_safe(payload.get("parameters") or {}), metrics=json_safe(payload.get("metrics") or (model_version.metrics if model_version else {})), reproducibility_manifest=json_safe(payload.get("reproducibility_manifest") or {}), status=str(payload.get("status", "COMPLETED")), started_at=utc_now(), completed_at=utc_now())

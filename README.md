@@ -75,7 +75,15 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | PII profiling/masking preview | `POST /api/v1/security/pii/profile` |
 | Durable jobs and schedules | `POST/GET /api/v1/jobs`; `POST /api/v1/jobs/schedules`; `GET /api/v1/jobs/worker/status`; run `python scripts/run_worker.py` as a separate worker |
 | Connectors and schema contracts | `GET /api/v1/connectors/catalog`; `POST /api/v1/connectors/test`; `POST /api/v1/connectors/schema/validate` |
+| Governed database/API ingestion | `POST /api/v1/datasets/import/database` and `/import/rest` use secret references, immutable versions, watermark checkpoints, contract rejection, and ingestion state |
 | Governed semantic metrics | `GET /api/v1/metrics/catalog`; `POST /api/v1/metrics/query` |
+| Natural-language SQL | `POST /api/v1/datasets/{dataset_id}/sql/natural-language` emits deterministic read-only SQL, validation, execution, and evidence |
+| Feature store materialization | `POST /api/v1/datasets/{dataset_id}/orchestration/feature_store` with `materialize=true`; `GET /api/v1/feature-sets/{asset_id}/lookup` |
+| Model serving and rollback | `POST /api/v1/models/{model_version_id}/predict`; `POST /api/v1/models/{model_id}/rollback` (approval/status gated) |
+| Alert rules and delivery | `POST/GET /api/v1/alerts/rules`; `POST /api/v1/alerts/evaluate`; `GET /api/v1/alerts/deliveries` (webhook secret + approval gated) |
+| Dependency and cost evidence | `GET /api/v1/datasets/{dataset_id}/dependency-graph`; `GET /api/v1/platform/cost-report` |
+| Searchable governed catalog | `GET /api/v1/catalog/search` searches tenant datasets, current schemas, and workspace assets |
+| Git/dbt handoff | `dbt/` contains a source-controlled staging contract and tests; warehouse profile/execution stays deployment-specific |
 | Column-level lineage | `GET /api/v1/datasets/{dataset_id}/lineage` includes version-column nodes and recorded transformation edges |
 | Partitioned Parquet storage | `POST /api/v1/storage/datasets/{dataset_id}/partition` writes a validated partitioned Parquet copy with predicate-pushdown support |
 | External BI/M365 integration gates | `GET /api/v1/integrations/catalog`; `POST /api/v1/integrations/plan`; `POST /api/v1/integrations/powerbi/validate`; external side effects remain approval-gated |

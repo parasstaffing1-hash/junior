@@ -54,9 +54,10 @@ def register_training_outcome(
     normalized_name = str(model_name).strip()
     if not normalized_name:
         raise IntelligenceError("MODEL_NAME_REQUIRED", "A model name is required.")
-    model = db.query(RegisteredModel).filter(RegisteredModel.workspace_id == workspace_id, RegisteredModel.name == normalized_name).first()
+    model = db.query(RegisteredModel).filter(RegisteredModel.tenant_id == dataset.tenant_id, RegisteredModel.workspace_id == workspace_id, RegisteredModel.name == normalized_name).first()
     if model is None:
         model = RegisteredModel(
+            tenant_id=dataset.tenant_id,
             workspace_id=workspace_id,
             name=normalized_name,
             task_type=str(outcome.result["task_type"]),
@@ -155,6 +156,7 @@ def transition_model_version(version: ModelVersion, requested_status: str) -> No
 def public_model(model: RegisteredModel) -> dict[str, Any]:
     return {
         "id": model.id,
+        "tenant_id": model.tenant_id,
         "workspace_id": model.workspace_id,
         "name": model.name,
         "task_type": model.task_type,

@@ -21,6 +21,8 @@ REQUIRE_TENANT_HEADER=true
 JOB_WORKER_ENABLED=true
 WORKER_ID=<unique-worker-id>
 BACKUP_ROOT=<durable-private-backup-location>
+COST_PER_COMPUTE_SECOND=<approved internal compute rate>
+COST_CURRENCY=USD
 ```
 
 Use a managed PostgreSQL service, private object storage for uploaded data and
@@ -28,6 +30,17 @@ backups, TLS at the ingress, and a secret manager for Power BI/Fabric,
 Microsoft Graph/Entra, Tableau, warehouse, and API credentials. The bootstrap
 admin key is only for provisioning the first tenant and operator keys; rotate it
 after provisioning.
+
+For optional live warehouse engines, install only the drivers required by the
+deployment from `requirements-connectors.txt` and install the matching system
+ODBC driver for SQL Server. The connector catalog reports `optional_driver`
+until the driver is actually importable; it never labels an uninstalled driver
+as live.
+
+Connector and alert URLs are referenced by secret name, for example
+`DATA_SOURCE_URL_SALES` and `ALERT_WEBHOOK_OPERATIONS`; raw URLs are rejected by
+the ingestion and alert APIs. This keeps source credentials and webhook tokens
+out of request logs and the database.
 
 ## Launch
 
@@ -51,6 +64,8 @@ after provisioning.
 - `GET /metrics` exposes request, latency, and status counters for the ingress
   and alerting system.
 - `GET /api/v1/platform/production-readiness` is the release gate.
+- `GET /api/v1/platform/cost-report` reports rows scanned, compute time, and
+  configured compute-unit cost by dataset and operation.
 - Audit records are written for API requests and security administration.
 - Dataset imports, automation actions, intelligence jobs, schedules, retries,
   and worker leases are tenant-scoped and persisted in PostgreSQL.

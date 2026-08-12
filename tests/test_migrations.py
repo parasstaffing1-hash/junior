@@ -55,6 +55,9 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         "audit_logs",
         "security_policies",
         "job_schedules",
+        "ingestion_states",
+        "alert_rules",
+        "alert_deliveries",
     }
     assert {column["name"] for column in inspector.get_columns("automation_runs")} >= {
         "job_type",
@@ -66,6 +69,10 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         set(constraint["column_names"]) == {"dataset_id", "version_number"}
         for constraint in inspector.get_unique_constraints("dataset_versions")
     )
+    assert "metadata" in {column["name"] for column in inspector.get_columns("dataset_versions")}
+    assert "tenant_id" in {column["name"] for column in inspector.get_columns("workspace_assets")}
+    assert "tenant_id" in {column["name"] for column in inspector.get_columns("registered_models")}
+    assert "tenant_id" in {column["name"] for column in inspector.get_columns("experiments")}
 
     _alembic(repo, database_url, "downgrade", "base")
     assert inspect(create_engine(database_url)).get_table_names() == ["alembic_version"]

@@ -9,7 +9,9 @@ from fastapi import APIRouter, Request
 
 from app.core.conversational import ConversationalDataIntelligence, conversational_catalog
 from app.core.intelligence.common import ExecutionBudget, IntelligenceError
-from app.models.all import Dataset, DatasetVersion
+from app.core.security import Actor, assert_dataset_tenant
+from app.core.security_policy import apply_row_policies, visible_columns
+from app.models.all import Dataset, DatasetVersion, SecurityPolicy
 
 
 router = APIRouter(prefix="/api/v1", tags=["conversational-intelligence"])
@@ -31,6 +33,14 @@ def _load_dataset(request: Request, dataset_id: str, source_version_id: str | No
             frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
         except pd.errors.EmptyDataError:
             frame = pd.DataFrame()
+        actor = getattr(request.state, "actor", None)
+        if actor is not None:
+            assert_dataset_tenant(db, dataset_id, actor)
+        tenant_id = actor.tenant_id if actor is not None else dataset.tenant_id
+        policy_actor = Actor("conversation-policy-engine", tenant_id, frozenset({"owner", "admin"}), frozenset({"*"}), frozenset({"*"}), "policy_engine")
+        policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == tenant_id, SecurityPolicy.workspace_id == "default").all()
+        frame, _ = apply_row_policies(frame, policies, policy_actor)
+        frame, _ = visible_columns(frame, policies)
         return dataset, version, frame
     finally:
         db.close()

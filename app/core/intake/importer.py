@@ -7,6 +7,8 @@ from pathlib import Path
 import os
 import shutil
 from uuid import uuid4
+import hashlib
+import pandas as pd
 
 from app.errors import AppError
 from app.models.all import Dataset, DatasetVersion
@@ -44,6 +46,82 @@ class DatasetImporter:
                         status_code=413,
                     )
                 buffer.write(chunk)
+
+    def import_dataframe(
+        self,
+        db: Session,
+        frame: pd.DataFrame,
+        *,
+        name: str,
+        source_type: str,
+        tenant_id: str = "default",
+        dataset_id: str | None = None,
+        parent_version_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> dict:
+        """Persist a connector result as an immutable dataset version.
+
+        This is the common write path for database/API ingestion. It keeps the
+        same versioning, checksum, tenant, and lineage contract as file uploads.
+        The caller owns any checkpoint transaction surrounding this operation.
+        """
+        if not isinstance(frame, pd.DataFrame):
+            raise AppError("INVALID_DATAFRAME", "Connector output must be a pandas DataFrame.", status_code=422)
+        if frame.empty:
+            raise AppError("EMPTY_DATASET", "The source returned no rows.", status_code=422)
+        safe_name = self._safe_filename(name)
+        tenant_id = str(tenant_id or "default")
+        if dataset_id:
+            dataset = db.query(Dataset).filter(Dataset.id == str(dataset_id), Dataset.tenant_id == tenant_id).first()
+            if dataset is None:
+                raise AppError("DATASET_NOT_FOUND", "The target dataset was not found for this tenant.", status_code=404)
+            previous = db.query(DatasetVersion).filter(DatasetVersion.dataset_id == dataset.id).order_by(DatasetVersion.version_number.desc()).first()
+            version_number = int(previous.version_number if previous else 0) + 1
+            parent_version_id = parent_version_id or (previous.id if previous else None)
+        else:
+            dataset = Dataset(
+                tenant_id=tenant_id,
+                name=safe_name,
+                source_type=str(source_type),
+                original_filename=safe_name,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            )
+            db.add(dataset)
+            db.flush()
+            version_number = 1
+
+        storage_key = f"{dataset.id}/v{version_number}.csv"
+        storage_path = Path(self.storage.root) / storage_key
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(storage_path, index=False)
+        sha256 = hashlib.sha256(storage_path.read_bytes()).hexdigest()
+        version = DatasetVersion(
+            dataset_id=dataset.id,
+            version_number=version_number,
+            parent_version_id=parent_version_id,
+            storage_path=storage_key,
+            sha256=sha256,
+            row_count=len(frame),
+            column_count=len(frame.columns),
+            metadata_json=metadata or {},
+            created_at=utc_now(),
+        )
+        db.add(version)
+        db.flush()
+        dataset.current_version_id = version.id
+        dataset.updated_at = utc_now()
+        return {
+            "dataset_id": dataset.id,
+            "version_id": version.id,
+            "version_number": version.version_number,
+            "name": dataset.name,
+            "source_type": dataset.source_type,
+            "row_count": version.row_count,
+            "column_count": version.column_count,
+            "parent_version_id": version.parent_version_id,
+            "status": "IMPORTED",
+        }
 
     async def inspect(self, upload: UploadFile) -> dict:
         """

@@ -1,0 +1,17 @@
+name: automated_data_analyst
+version: '1.0.0'
+config-version: 2
+
+profile: automated_data_analyst
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  automated_data_analyst:
+    +materialized: view
+    staging:
+      +tags: ["governed", "bi-ready"]

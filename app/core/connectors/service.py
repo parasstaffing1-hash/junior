@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import ipaddress
+import importlib.util
 import json
 import time
 from typing import Any
@@ -84,11 +85,25 @@ class ConnectorService:
 
     @staticmethod
     def catalog() -> list[dict[str, Any]]:
+        def database_entry(identifier: str, driver: str, label: str) -> dict[str, Any]:
+            try:
+                installed = importlib.util.find_spec(driver) is not None
+            except (ImportError, ModuleNotFoundError):
+                installed = False
+            return {
+                "id": identifier,
+                "kind": "database",
+                "status": "available" if installed else "optional_driver",
+                "driver": driver,
+                "label": label,
+                "capabilities": ["read", "schema", "watermark_incremental"] if installed else ["read", "schema", "watermark_incremental"],
+                "installation_required": not installed,
+            }
         return [
-            {"id": "postgresql", "kind": "database", "status": "available", "capabilities": ["read", "schema", "watermark_incremental"]},
-            {"id": "sqlserver", "kind": "database", "status": "available", "capabilities": ["read", "schema", "watermark_incremental"]},
-            {"id": "snowflake", "kind": "database", "status": "available", "capabilities": ["read", "schema", "watermark_incremental"]},
-            {"id": "bigquery", "kind": "database", "status": "available", "capabilities": ["read", "schema", "watermark_incremental"]},
+            database_entry("postgresql", "psycopg2", "PostgreSQL via psycopg2"),
+            database_entry("sqlserver", "pyodbc", "SQL Server via pyodbc and an installed ODBC driver"),
+            database_entry("snowflake", "snowflake.sqlalchemy", "Snowflake via snowflake-sqlalchemy"),
+            database_entry("bigquery", "google.cloud.bigquery", "BigQuery via google-cloud-bigquery and sqlalchemy-bigquery"),
             {"id": "rest_json", "kind": "api", "status": "available", "capabilities": ["read", "pagination", "retries", "schema_drift"]},
             {"id": "parquet", "kind": "file", "status": "available", "capabilities": ["read", "predicate_pushdown", "partitioned_storage"]},
         ]

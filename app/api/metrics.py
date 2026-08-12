@@ -5,8 +5,9 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from app.core.kpi.calculator import calculate_kpi
-from app.core.security import SecurityError, authorize, assert_dataset_tenant
-from app.models.all import DatasetVersion, WorkspaceAsset
+from app.core.security import Actor, SecurityError, authorize, assert_dataset_tenant
+from app.core.security_policy import apply_row_policies, visible_columns
+from app.models.all import DatasetVersion, WorkspaceAsset, SecurityPolicy
 import pandas as pd
 
 
@@ -26,7 +27,7 @@ def metric_catalog(request: Request, workspace_id: str = "default"):
     authorize(actor, "read", workspace_id=workspace_id)
     db = request.app.state.SessionLocal()
     try:
-        rows = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type.in_(["metric", "kpi"]), WorkspaceAsset.status.in_(["certified", "published", "approved", "draft"])).order_by(WorkspaceAsset.name.asc()).all()
+        rows = db.query(WorkspaceAsset).filter(WorkspaceAsset.tenant_id == actor.tenant_id, WorkspaceAsset.workspace_id == workspace_id, WorkspaceAsset.asset_type.in_(["metric", "kpi"]), WorkspaceAsset.status.in_(["certified", "published", "approved", "draft"])).order_by(WorkspaceAsset.name.asc()).all()
         return {"workspace_id": workspace_id, "metrics": [{"id": row.id, "name": row.name, "description": row.description, "status": row.status, "owner": row.owner, "version": row.version, "definition": row.definition_json} for row in rows]}
     finally:
         db.close()
@@ -43,7 +44,7 @@ def query_metric(payload: dict[str, Any], request: Request):
     db = request.app.state.SessionLocal()
     try:
         dataset = assert_dataset_tenant(db, dataset_id, actor)
-        asset = db.query(WorkspaceAsset).filter(WorkspaceAsset.workspace_id == str(payload.get("workspace_id", "default")), WorkspaceAsset.asset_type.in_(["metric", "kpi"]), WorkspaceAsset.name == metric_name).first()
+        asset = db.query(WorkspaceAsset).filter(WorkspaceAsset.tenant_id == actor.tenant_id, WorkspaceAsset.workspace_id == str(payload.get("workspace_id", "default")), WorkspaceAsset.asset_type.in_(["metric", "kpi"]), WorkspaceAsset.name == metric_name).first()
         if asset is None:
             raise SecurityError("METRIC_NOT_FOUND", "The governed metric was not found.", status_code=404, details={"metric": metric_name})
         if asset.status not in {"certified", "published", "approved", "draft"}:
@@ -52,6 +53,10 @@ def query_metric(payload: dict[str, Any], request: Request):
         if version is None:
             raise SecurityError("VERSION_NOT_FOUND", "Dataset has no current version.", status_code=404)
         frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
+        policy_actor = Actor("metric-policy-engine", actor.tenant_id, frozenset({"owner", "admin"}), frozenset({"*"}), frozenset({"*"}), "policy_engine")
+        policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == actor.tenant_id, SecurityPolicy.workspace_id == str(payload.get("workspace_id", "default"))).all()
+        frame, _ = apply_row_policies(frame, policies, policy_actor)
+        frame, _ = visible_columns(frame, policies)
         definition = asset.definition_json or {}
         result = calculate_kpi(frame, definition, filters=payload.get("filters"), dimensions=payload.get("dimensions"), time_column=payload.get("time_column"), time_grain=payload.get("time_grain"))
         return {"metric": metric_name, "metric_id": asset.id, "metric_version": asset.version, "dataset_id": dataset_id, "source_version_id": version.id, "definition": definition, "result": result}

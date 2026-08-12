@@ -19,6 +19,10 @@ def ensure_additive_local_schema(database_engine) -> None:
     inspector = inspect(database_engine)
     additions = {
         "datasets": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "workspace_assets": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "registered_models": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "experiments": {"tenant_id": "VARCHAR NOT NULL DEFAULT 'default'"},
+        "dataset_versions": {"metadata": "JSON"},
         "automation_runs": {
             "tenant_id": "VARCHAR NOT NULL DEFAULT 'default'",
             "max_attempts": "INTEGER NOT NULL DEFAULT 3",
@@ -28,6 +32,15 @@ def ensure_additive_local_schema(database_engine) -> None:
             "locked_by": "VARCHAR",
             "heartbeat_at": "DATETIME",
             "retryable": "BOOLEAN NOT NULL DEFAULT 1",
+        },
+        "alert_rules": {
+            "tenant_id": "VARCHAR NOT NULL DEFAULT 'default'",
+            "workspace_id": "VARCHAR NOT NULL DEFAULT 'default'",
+            "name": "VARCHAR NOT NULL DEFAULT 'alert'",
+            "definition": "JSON NOT NULL DEFAULT '{}'",
+            "enabled": "BOOLEAN NOT NULL DEFAULT 1",
+            "created_at": "DATETIME",
+            "updated_at": "DATETIME",
         },
     }
     with database_engine.begin() as connection:
