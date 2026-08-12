@@ -24,8 +24,29 @@ services:
       STORAGE_ROOT: /app/storage
       MAX_UPLOAD_BYTES: 104857600
       APP_ENV: production
+      AUTH_MODE: api_key
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY before starting production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8000}
+      REQUIRE_TENANT_HEADER: "true"
+      JOB_WORKER_ENABLED: "true"
     depends_on:
       db:
+        condition: service_healthy
+    volumes:
+      - ./storage:/app/storage
+
+  worker:
+    build: .
+    command: ["python", "scripts/run_worker.py"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://admin:adminpassword@db:5432/analytics
+      STORAGE_ROOT: /app/storage
+      APP_ENV: production
+      AUTH_MODE: api_key
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY before starting production}
+      JOB_WORKER_ENABLED: "true"
+    depends_on:
+      app:
         condition: service_healthy
     volumes:
       - ./storage:/app/storage

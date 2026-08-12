@@ -150,6 +150,9 @@ def build_bi_report(
         )
 
     dashboard_template = get_dashboard_template(template_id)
+    # Keep the default executive template focused; richer templates deliberately
+    # opt into the additional operational driver visuals.
+    extended_visuals = dashboard_template["id"] in {"powerbi_executive_sales", "powerbi_kpi_slicer", "operations"}
     report_id = str(uuid4())
     output_path = Path(output_dir).expanduser().resolve() / report_id if output_dir else None
     work = df.copy(deep=True)
@@ -385,7 +388,7 @@ def build_bi_report(
         except Exception as exc:
             notes.append(f"Sales-channel mix unavailable: {exc}")
 
-    if units_column and product_column:
+    if extended_visuals and units_column and product_column:
         chart_output = _chart_path(output_path, "units_by_product") if output_path else None
         try:
             spec = build_bar_chart(
@@ -406,7 +409,7 @@ def build_bi_report(
         except Exception as exc:
             notes.append(f"Units by product unavailable: {exc}")
 
-    if profit_column and date_column:
+    if extended_visuals and profit_column and date_column:
         chart_output = _chart_path(output_path, "profit_over_time") if output_path else None
         try:
             spec = build_line_chart(

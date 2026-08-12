@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import re
+import time
+import uuid
 from collections import OrderedDict
 import json
 from pathlib import Path
-import re
 from typing import Any, Optional
 from urllib.parse import urlencode
 
@@ -18,7 +20,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from app.core.database import Base, SessionLocal, build_database, engine
+from app.core.database import Base, SessionLocal, build_database, engine, ensure_additive_local_schema
+from app.core.config import load_settings
+from app.core.security import Actor, RateLimiter, SecurityError, assert_dataset_tenant, authenticate, audit_request
+from app.core.security_policy import apply_row_policies, visible_columns
+from app.core.observability import MetricsRegistry
+from app.core.lineage import build_column_lineage
+from app.core.enterprise.production_readiness import production_readiness
 from app.core.automation.gateway import action_catalog, dispatch_plan
 from app.core.cleaning.recipe_engine import execute_recipe
 from app.core.dashboard.layout import validate_layout
@@ -55,7 +63,7 @@ from app.core.sql.workbench import (
 from app.core.transformation.pipeline import execute_pipeline
 from app.core.visualization.recommender import recommend_charts
 from app.errors import AppError
-from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset, GeographicBoundary
+from app.models.all import AnalysisRun, Artifact, AuditEvent, Dataset, DatasetVersion, AutomationRun, WorkspaceAsset, GeographicBoundary, SecurityPolicy
 from app.orchestration.automated_analyst import AutomatedAnalyst
 from app.orchestration.platform import (
     PlatformAnalysisError,
@@ -69,10 +77,17 @@ from app.orchestration.platform import (
 )
 from app.core.intake.importer import DatasetImporter
 from app.core.intelligence.common import IntelligenceError, bounded_frame
+from app.core.jobs.queue import DurableJobQueue
 from app.api.intelligence import router as intelligence_router
 from app.api.geographic import router as geographic_router
 from app.api.conversation import router as conversation_router
 from app.api.bi_readiness import router as bi_readiness_router
+from app.api.security import router as security_router
+from app.api.jobs import router as jobs_router
+from app.api.connectors import router as connectors_router
+from app.api.metrics import router as metrics_router
+from app.api.integrations import router as integrations_router
+from app.api.storage import router as storage_router
 from app.core.bi.report_service import build_bi_report
 from app.core.bi.export_formats import INTERACTIVE_EXPORT_FORMATS, resolve_export_formats
 from app.core.projects.catalog import FLAGSHIP_PROJECT_IDS, get_project_spec, list_flagship_project_specs, list_project_specs
@@ -185,6 +200,7 @@ def _remove_artifact_paths(value):
 
 def create_app(*, database_url: str | None = None, storage_root: str | Path | None = None, max_upload_bytes: int | None = None) -> FastAPI:
     """Create an isolated app instance for production or tests."""
+    settings = load_settings(database_url=database_url, storage_root=storage_root)
     if database_url is None:
         database_engine, session_factory = engine, SessionLocal
     else:
@@ -195,14 +211,9 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     # before the web process starts.
     should_bootstrap_schema = database_url is not None or os.getenv("APP_ENV", "development").casefold() != "production"
     if should_bootstrap_schema:
-        Base.metadata.create_all(bind=database_engine)
-    configured_storage_root = storage_root or os.getenv("STORAGE_ROOT") or PROJECT_ROOT / "storage"
-    configured_limit = max_upload_bytes
-    if configured_limit is None:
-        try:
-            configured_limit = int(os.getenv("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))
-        except ValueError as exc:
-            raise RuntimeError("MAX_UPLOAD_BYTES must be an integer.") from exc
+        ensure_additive_local_schema(database_engine)
+    configured_storage_root = storage_root or settings.storage_root
+    configured_limit = max_upload_bytes if max_upload_bytes is not None else settings.max_upload_bytes
     if configured_limit <= 0:
         raise RuntimeError("MAX_UPLOAD_BYTES must be greater than zero.")
     storage = DatasetStorage(root=str(configured_storage_root), max_upload_bytes=configured_limit)
@@ -213,6 +224,9 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.state.SessionLocal = session_factory
     app.state.storage = storage
     app.state.importer = importer
+    app.state.settings = settings
+    app.state.rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+    app.state.metrics = MetricsRegistry()
     app.state.bi_report_cache = OrderedDict()
     try:
         app.state.bi_report_cache_size = max(1, min(10, int(os.getenv("BI_REPORT_CACHE_SIZE", "3"))))
@@ -221,11 +235,62 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["*"] if settings.auth_mode == "disabled" else list(settings.allowed_origins),
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Tenant-ID", "X-Workspace-ID", "X-Request-ID", "X-Correlation-ID"],
     )
+
+    @app.middleware("http")
+    async def security_and_observability_middleware(request: Request, call_next):
+        started = time.perf_counter()
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        request.state.correlation_id = request.headers.get("x-correlation-id") or request_id
+        public_path = request.url.path in {"/", "/health", "/health/live", "/health/ready"} or request.url.path.startswith("/static") or request.url.path in {"/docs", "/redoc", "/openapi.json"}
+        actor = Actor("anonymous", request.headers.get("x-tenant-id", "default"), frozenset({"read"}), frozenset({"read"}), frozenset(), "anonymous")
+        if not public_path:
+            db = request.app.state.SessionLocal()
+            try:
+                try:
+                    actor = authenticate(request, request.app.state.settings, db)
+                except SecurityError as exc:
+                    return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}, "request_id": request_id}, headers={"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None)
+                limiter_key = f"{actor.tenant_id}:{actor.principal_id}:{request.client.host if request.client else 'unknown'}"
+                if not request.app.state.rate_limiter.allow(limiter_key):
+                    return JSONResponse(status_code=429, content={"error": {"code": "RATE_LIMITED", "message": "Rate limit exceeded.", "details": {"retry_after_seconds": 60}}, "request_id": request_id}, headers={"Retry-After": "60"})
+                dataset_match = re.search(r"/api/v1/datasets/([^/]+)", request.url.path)
+                if dataset_match:
+                    candidate = db.query(Dataset).filter(Dataset.id == dataset_match.group(1)).first()
+                    if candidate is not None and candidate.tenant_id != actor.tenant_id:
+                        return JSONResponse(status_code=403, content={"error": {"code": "TENANT_FORBIDDEN", "message": "The dataset belongs to another tenant.", "details": {"dataset_id": candidate.id}}, "request_id": request_id})
+            finally:
+                db.close()
+        request.state.actor = actor
+        response = None
+        error_code = None
+        try:
+            response = await call_next(request)
+            request.app.state.metrics.record_request(request.method, request.url.path, response.status_code, time.perf_counter() - started)
+            return response
+        except SecurityError as exc:
+            error_code = exc.code
+            return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message, "details": exc.details}, "request_id": request_id})
+        finally:
+            if response is not None:
+                response.headers["X-Request-ID"] = request_id
+                response.headers["X-Content-Type-Options"] = "nosniff"
+                response.headers["X-Frame-Options"] = "DENY"
+                response.headers["Referrer-Policy"] = "same-origin"
+                response.headers["Cache-Control"] = "no-store" if request.url.path.startswith("/api/") else response.headers.get("Cache-Control", "")
+                if request.url.path.startswith("/api/"):
+                    audit_db = request.app.state.SessionLocal()
+                    try:
+                        audit_request(audit_db, actor=actor, request=request, status_code=response.status_code, duration_ms=(time.perf_counter() - started) * 1000, success=response.status_code < 400, error_code=error_code)
+                    except Exception:
+                        audit_db.rollback()
+                    finally:
+                        audit_db.close()
 
     if FRONTEND_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -316,6 +381,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             return dataset, cached
         try:
             source_frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
+            actor = getattr(request.state, "actor", Actor("development", dataset.tenant_id, frozenset({"admin"}), frozenset({"*"}), frozenset({"*"})))
+            policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == actor.tenant_id, SecurityPolicy.workspace_id == "default").all()
+            source_frame, _ = apply_row_policies(source_frame, policies, actor)
+            source_frame, _ = visible_columns(source_frame, policies)
             frame, execution_metadata = bounded_frame(source_frame, budget=PLATFORM_ANALYSIS_BUDGET)
             analysis_basis = build_analysis_basis(execution_metadata)
             report = build_bi_report(
@@ -580,6 +649,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             frame = pd.read_csv(request.app.state.storage.resolve(version.storage_path))
         except pd.errors.EmptyDataError:
             frame = pd.DataFrame()
+        actor = getattr(request.state, "actor", Actor("development", dataset.tenant_id, frozenset({"admin"}), frozenset({"*"}), frozenset({"*"})))
+        policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == actor.tenant_id, SecurityPolicy.workspace_id == "default").all()
+        frame, _ = apply_row_policies(frame, policies, actor)
+        frame, _ = visible_columns(frame, policies)
         return dataset, version, frame
 
     def public_workspace_asset(asset: WorkspaceAsset) -> dict[str, Any]:
@@ -646,6 +719,10 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     @app.get("/api/v1/platform/acquisition-readiness")
     def platform_acquisition_readiness():
         return readiness_summary()
+
+    @app.get("/api/v1/platform/production-readiness")
+    def platform_production_readiness(request: Request):
+        return production_readiness(request.app.state.settings)
 
     @app.get("/api/v1/platform/professional-capabilities")
     def platform_professional_capabilities():
@@ -1065,6 +1142,14 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             db.query(Dataset).limit(1).all()
         return {"status": "ready"}
 
+    @app.get("/metrics")
+    def metrics_endpoint(request: Request):
+        if request.app.state.settings.auth_mode != "disabled":
+            actor = getattr(request.state, "actor", None)
+            if actor is None or not actor.is_admin:
+                raise SecurityError("FORBIDDEN", "Metrics require an administrator.", status_code=403)
+        return Response(content=request.app.state.metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
+
     @app.get("/api/v1/datasets")
     def list_datasets(db: Session = Depends(get_db)):
         datasets = db.query(Dataset).order_by(Dataset.created_at.desc()).all()
@@ -1099,7 +1184,8 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         db: Session = Depends(get_db),
     ):
         kwargs = {"sheet_name": sheet_name} if sheet_name else {}
-        return await request.app.state.importer.import_file(db=db, upload=file, **kwargs)
+        actor = getattr(request.state, "actor", None)
+        return await request.app.state.importer.import_file(db=db, upload=file, tenant_id=getattr(actor, "tenant_id", "default"), **kwargs)
 
     @app.get("/api/v1/datasets/{dataset_id}/preview")
     def get_dataset_preview(
@@ -1380,18 +1466,20 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return [{"id": version.id, "version_number": version.version_number, "parent_version_id": version.parent_version_id, "storage_path": version.storage_path, "sha256": version.sha256, "row_count": version.row_count, "column_count": version.column_count, "created_at": version.created_at, "is_current": version.id == dataset.current_version_id} for version in versions]
 
     @app.get("/api/v1/datasets/{dataset_id}/lineage")
-    def get_dataset_lineage(dataset_id: str, db: Session = Depends(get_db)):
+    def get_dataset_lineage(dataset_id: str, request: Request, db: Session = Depends(get_db)):
         dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
         if dataset is None:
             raise AppError("DATASET_NOT_FOUND", "Dataset was not found.", status_code=404, details={"dataset_id": dataset_id})
         audits = db.query(AuditEvent).filter(AuditEvent.dataset_id == dataset_id).order_by(AuditEvent.timestamp.asc()).all()
         artifacts = db.query(Artifact).filter(Artifact.dataset_id == dataset_id).order_by(Artifact.created_at.asc()).all()
+        versions = db.query(DatasetVersion).filter(DatasetVersion.dataset_id == dataset_id).order_by(DatasetVersion.version_number.asc()).all()
         return {
             "dataset_id": dataset_id,
             "dataset_name": dataset.name,
             "current_version_id": dataset.current_version_id,
             "events": [{"id": event.id, "engine": event.engine, "input_version_id": event.input_version_id, "output_version_id": event.output_version_id, "parameters": event.parameters, "affected_rows": event.affected_rows, "affected_columns": event.affected_columns, "before_stats": event.before_stats, "after_stats": event.after_stats, "timestamp": event.timestamp} for event in audits],
             "artifacts": [{"id": artifact.id, "type": artifact.artifact_type, "source_version_id": artifact.source_version_id, "storage_path": artifact.storage_path, "sha256": artifact.sha256, "size": artifact.size, "metadata": artifact.metadata_json, "created_at": artifact.created_at} for artifact in artifacts],
+            "column_lineage": build_column_lineage(versions, audits, artifacts, request.app.state.storage),
         }
 
     @app.post("/api/v1/datasets/{dataset_id}/quality/analyze")
@@ -1525,12 +1613,29 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         try:
             run = db.query(AutomationRun).filter(AutomationRun.id == run_id).first()
             if not run: return
+
+            # Intelligence jobs use the same durable worker entrypoint as
+            # core automation jobs when the production worker is enabled.
+            if str(run.action or "").startswith("intelligence."):
+                db.close()
+                from app.api.intelligence import _execute_background_job
+                _execute_background_job(app, run.id, raise_on_error=True)
+                return
             
             run.status = "RUNNING"
             run.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
             db.commit()
             
             req = DummyRequest(app)
+            req.state = type("WorkerState", (), {})()
+            req.state.actor = Actor(
+                "durable-worker",
+                run.tenant_id or "default",
+                frozenset({"owner", "admin"}),
+                frozenset({"*"}),
+                frozenset({"*"}),
+                "worker",
+            )
             action = run.action
             action_payload = run.parameters.get("payload") or {}
             context = run.parameters.get("context") or {}
@@ -1576,8 +1681,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
             run.error_details = {"error": str(exc)}
             run.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             db.commit()
+            raise
         finally:
             db.close()
+
+    app.state.execute_automation_run = _execute_automation_run
 
     @app.post("/api/v1/automation/actions")
     @app.post("/api/v1/automation/execute")
@@ -1588,9 +1696,11 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         action_payload = body.get("payload") or {}
         idempotency_key = body.get("idempotency_key")
         correlation_id = body.get("correlation_id")
+        actor = getattr(request.state, "actor", None)
+        tenant_id = actor.tenant_id if actor is not None else "default"
         
         if idempotency_key:
-            existing = db.query(AutomationRun).filter(AutomationRun.idempotency_key == idempotency_key).first()
+            existing = db.query(AutomationRun).filter(AutomationRun.tenant_id == tenant_id, AutomationRun.idempotency_key == idempotency_key).first()
             if existing:
                 return {"run_id": existing.id, "status": existing.status, "message": "Returned existing run due to idempotency_key."}
 
@@ -1599,7 +1709,22 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         except Exception as exc:
             raise AppError("AUTOMATION_ACTION_NOT_ALLOWED", getattr(exc, "message", str(exc)), status_code=422, details=getattr(exc, "details", {})) from exc
 
+        if request.app.state.settings.job_worker_enabled:
+            durable_payload = dict(action_payload)
+            if correlation_id:
+                durable_payload.setdefault("correlation_id", correlation_id)
+            queued = DurableJobQueue(request.app.state.SessionLocal, worker_id=request.app.state.settings.worker_id).enqueue(
+                tenant_id=tenant_id,
+                action=action,
+                context=context,
+                payload=durable_payload,
+                idempotency_key=idempotency_key,
+                max_attempts=int(body.get("max_attempts", 3)),
+            )
+            return {"run_id": queued.id, "status": queued.status, "durable": True}
+
         run = AutomationRun(
+            tenant_id=tenant_id,
             dataset_id=context.get("dataset_id", "GLOBAL"),
             source_version_id=context.get("version_id"),
             action=action,
@@ -1617,8 +1742,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
         return {"run_id": run.id, "status": run.status}
 
     @app.get("/api/v1/automation/runs/{run_id}")
-    def get_automation_run_status(run_id: str, db: Session = Depends(get_db)):
-        run = db.query(AutomationRun).filter(AutomationRun.id == run_id).first()
+    def get_automation_run_status(run_id: str, request: Request, db: Session = Depends(get_db)):
+        actor = getattr(request.state, "actor", None)
+        run_query = db.query(AutomationRun).filter(AutomationRun.id == run_id)
+        if actor is not None:
+            run_query = run_query.filter(AutomationRun.tenant_id == actor.tenant_id)
+        run = run_query.first()
         if not run:
             raise AppError("RUN_NOT_FOUND", "Automation run not found", status_code=404)
         return {
@@ -1657,6 +1786,12 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.include_router(geographic_router)
     app.include_router(conversation_router)
     app.include_router(bi_readiness_router)
+    app.include_router(security_router)
+    app.include_router(jobs_router)
+    app.include_router(metrics_router)
+    app.include_router(integrations_router)
+    app.include_router(storage_router)
+    app.include_router(connectors_router)
 
     return app
 

@@ -17,6 +17,7 @@ class Dataset(Base):
     __tablename__ = "datasets"
     
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     name = Column(String, nullable=False)
     source_type = Column(String, default="csv")
     original_filename = Column(String, nullable=False)
@@ -112,6 +113,7 @@ class AutomationRun(Base):
     __tablename__ = "automation_runs"
     
     id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, default="default", index=True)
     dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False)
     source_version_id = Column(String, ForeignKey("dataset_versions.id"), nullable=True)
     action = Column(String, nullable=False)
@@ -127,6 +129,13 @@ class AutomationRun(Base):
     created_at = Column(DateTime, default=utc_now)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    next_run_at = Column(DateTime, nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True)
+    locked_by = Column(String, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True)
+    retryable = Column(Boolean, nullable=False, default=True)
 
 class ReportDefinition(Base):
     __tablename__ = "report_definitions"
@@ -338,5 +347,125 @@ class GeographicMapping(Base):
     admin_level = Column(Integer, nullable=False, default=0)
     method = Column(String, nullable=False, default="manual")
     confidence = Column(Float, nullable=False, default=1.0)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class Tenant(Base):
+    """Top-level isolation boundary for a customer organization."""
+
+    __tablename__ = "tenants"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    slug = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="active", index=True)
+    plan = Column(String, nullable=False, default="standard")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class User(Base):
+    """Application identity owned by a tenant."""
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    email = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class ApiKey(Base):
+    """Only a one-way hash is persisted; the secret is returned once at creation."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_api_keys_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    key_prefix = Column(String, nullable=False)
+    key_hash = Column(String, nullable=False, unique=True, index=True)
+    roles = Column(JSON, nullable=False, default=list)
+    scopes = Column(JSON, nullable=False, default=list)
+    workspace_ids = Column(JSON, nullable=False, default=list)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    expires_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+
+
+class WorkspaceMembership(Base):
+    __tablename__ = "workspace_memberships"
+    __table_args__ = (UniqueConstraint("tenant_id", "user_id", "workspace_id", name="uq_workspace_membership"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False, default="viewer")
+    created_at = Column(DateTime, default=utc_now)
+
+
+class AuditLog(Base):
+    """Tenant-scoped immutable security and operational audit record."""
+
+    __tablename__ = "audit_logs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    actor_id = Column(String, nullable=True, index=True)
+    action = Column(String, nullable=False, index=True)
+    resource_type = Column(String, nullable=False, index=True)
+    resource_id = Column(String, nullable=True, index=True)
+    success = Column(Boolean, nullable=False, default=True)
+    status_code = Column(Integer, nullable=False, default=200)
+    request_id = Column(String, nullable=True, index=True)
+    correlation_id = Column(String, nullable=True, index=True)
+    metadata_json = Column("metadata", JSON, nullable=True)
+    duration_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+
+
+class SecurityPolicy(Base):
+    """Row/object-level policy definition evaluated before data is exposed."""
+
+    __tablename__ = "security_policies"
+    __table_args__ = (UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_security_policy_scope_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    target_type = Column(String, nullable=False, default="row")
+    definition = Column(JSON, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class JobSchedule(Base):
+    """Database-backed schedule; a worker materializes due executions."""
+
+    __tablename__ = "job_schedules"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_job_schedule_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    context = Column(JSON, nullable=False, default=dict)
+    payload = Column(JSON, nullable=False, default=dict)
+    interval_seconds = Column(Integer, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    next_run_at = Column(DateTime, nullable=False, index=True)
+    last_run_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

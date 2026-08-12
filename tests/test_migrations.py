@@ -48,6 +48,13 @@ def test_alembic_upgrade_downgrade_round_trip(tmp_path: Path):
         "approval_records",
         "geographic_boundaries",
         "geographic_mappings",
+        "tenants",
+        "users",
+        "api_keys",
+        "workspace_memberships",
+        "audit_logs",
+        "security_policies",
+        "job_schedules",
     }
     assert {column["name"] for column in inspector.get_columns("automation_runs")} >= {
         "job_type",

@@ -2,6 +2,14 @@
 
 Updated: 2026-08-12
 
+## Production control-plane increment
+
+- Added validated runtime configuration with production fail-closed API-key authentication, tenant headers, RBAC scopes, rate limits, security headers, request IDs, audit logs, PII profiling/masking preview, and row/object security policy records.
+- Added durable database-backed jobs with idempotency, leases, heartbeats, bounded retries, interval schedules, worker status, and `scripts/run_worker.py`.
+- Added governed database/REST/Parquet connector adapters with read-only SQL, retries, pagination, SSRF protections, schema-contract validation, and partitioned Parquet storage with predicate pushdown.
+- Added governed semantic metric queries, column-level lineage graphs, Prometheus-compatible request metrics, approval-gated Power BI/Fabric/Graph/Tableau integration contracts, hardened non-root containers, health checks, CI, and database backup tooling.
+- Verification after this increment: focused security/jobs/connectors/storage/migration/application suite passes; full regression remains required before release.
+
 ## Current milestone
 
 The platform contains a working Automated Data Analyst / BI workspace with deterministic quality, cleaning, SQL, statistics, EDA, forecasting, machine learning, model governance, reporting, Power BI/Tableau exports, Infographics Maker, Geographic Intelligence, and a Staff BI Control Center with automatic/manual operating modes.

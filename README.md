@@ -71,6 +71,15 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Boundary bootstraps | `POST /api/v1/geographic/boundaries/bootstrap/india` installs India states; `POST /api/v1/geographic/boundaries/bootstrap/world` (or `/global`) installs the public-domain Natural Earth 50m country layer with provenance metadata. Global joins accept country names, ISO-2, ISO-3 and numeric ISO keys. |
 | Geographic resolver / mappings | `POST /api/v1/geographic/resolve` and `/api/v1/geographic/mappings` |
 | Location analytics / saved maps | `POST /api/v1/datasets/{dataset_id}/geographic/location-analytics`; `GET/POST /api/v1/geographic/saved-maps` |
+| Security session/API keys/policies/audit | `GET /api/v1/security/session`; `POST /api/v1/security/tenants`, `/users`, `/api-keys`, `/policies`; `GET /api/v1/security/audit`; production requires `AUTH_MODE=api_key`, `ADMIN_API_KEY`, and `X-Tenant-ID` |
+| PII profiling/masking preview | `POST /api/v1/security/pii/profile` |
+| Durable jobs and schedules | `POST/GET /api/v1/jobs`; `POST /api/v1/jobs/schedules`; `GET /api/v1/jobs/worker/status`; run `python scripts/run_worker.py` as a separate worker |
+| Connectors and schema contracts | `GET /api/v1/connectors/catalog`; `POST /api/v1/connectors/test`; `POST /api/v1/connectors/schema/validate` |
+| Governed semantic metrics | `GET /api/v1/metrics/catalog`; `POST /api/v1/metrics/query` |
+| Column-level lineage | `GET /api/v1/datasets/{dataset_id}/lineage` includes version-column nodes and recorded transformation edges |
+| Partitioned Parquet storage | `POST /api/v1/storage/datasets/{dataset_id}/partition` writes a validated partitioned Parquet copy with predicate-pushdown support |
+| External BI/M365 integration gates | `GET /api/v1/integrations/catalog`; `POST /api/v1/integrations/plan`; `POST /api/v1/integrations/powerbi/validate`; external side effects remain approval-gated |
+| Prometheus metrics | `GET /metrics` (admin-only when authentication is enabled) |
 
 ## Tools 101–300 integration evidence
 
@@ -107,7 +116,11 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/automated-analy
 docker compose up --build
 ```
 
-Then open <http://127.0.0.1:8000>. The application waits for PostgreSQL to become healthy before starting.
+Then open <http://127.0.0.1:8000>. The application waits for PostgreSQL to become healthy before starting. Set `ADMIN_API_KEY` before starting production Compose; the separate `worker` service runs the durable queue.
+
+The release checklist, secret/configuration requirements, external BI/identity
+acceptance tests, backup/restore procedure, and deliberate production gates are
+in [docs/PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md).
 
 ## Test
 

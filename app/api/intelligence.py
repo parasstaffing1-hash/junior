@@ -18,6 +18,9 @@ from app.core.ml.monitoring import MONITORING_OPERATIONS, MonitoringService
 from app.core.ml.service import MachineLearningService, TrainingOutcome
 from app.core.ml.unsupervised import UnsupervisedLearningService, UnsupervisedOutcome
 from app.core.mlops import MLOpsService
+from app.core.jobs.queue import DurableJobQueue
+from app.core.security import Actor
+from app.core.security_policy import apply_row_policies, visible_columns
 from app.models.all import (
     AnalysisRun,
     ApprovalRecord,
@@ -31,6 +34,7 @@ from app.models.all import (
     MonitoringPolicy,
     MonitoringRun,
     RegisteredModel,
+    SecurityPolicy,
     WorkspaceAsset,
 )
 from app.orchestration.intelligence import IntelligenceOrchestrator
@@ -92,10 +96,13 @@ def _load_dataset(
     storage: DatasetStorage,
     dataset_id: str,
     source_version_id: str | None = None,
+    expected_tenant_id: str | None = None,
 ) -> tuple[Dataset, DatasetVersion, pd.DataFrame]:
     dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if dataset is None:
         raise IntelligenceError("DATASET_NOT_FOUND", "Dataset was not found.", {"dataset_id": dataset_id}, status_code=404)
+    if expected_tenant_id and dataset.tenant_id != expected_tenant_id:
+        raise IntelligenceError("TENANT_FORBIDDEN", "The dataset belongs to another tenant.", {"dataset_id": dataset_id}, status_code=403)
     version_id = source_version_id or dataset.current_version_id
     version = db.query(DatasetVersion).filter(DatasetVersion.id == version_id).first()
     if version is None:
@@ -107,6 +114,11 @@ def _load_dataset(
         frame = pd.read_csv(path)
     except pd.errors.EmptyDataError:
         frame = pd.DataFrame()
+    if expected_tenant_id:
+        actor = Actor("durable-worker", expected_tenant_id, frozenset({"owner", "admin"}), frozenset({"*"}), frozenset({"*"}), "worker")
+        policies = db.query(SecurityPolicy).filter(SecurityPolicy.tenant_id == expected_tenant_id, SecurityPolicy.workspace_id == "default").all()
+        frame, _ = apply_row_policies(frame, policies, actor)
+        frame, _ = visible_columns(frame, policies)
     return dataset, version, frame
 
 
@@ -693,7 +705,7 @@ def create_experiment_run(experiment_id: str, request: Request, payload: dict[st
         db.close()
 
 
-def _execute_background_job(app: Any, job_id: str) -> None:
+def _execute_background_job(app: Any, job_id: str, *, raise_on_error: bool = False) -> None:
     db = app.state.SessionLocal()
     try:
         job = db.query(AutomationRun).filter(AutomationRun.id == job_id).first()
@@ -704,9 +716,14 @@ def _execute_background_job(app: Any, job_id: str) -> None:
         job.started_at = utc_now()
         db.commit()
         parameters = dict(job.parameters or {})
+        if "payload" in parameters and "context" in parameters:
+            # DurableJobQueue wraps action payloads with execution context.
+            queued_payload = dict(parameters.get("payload") or {})
+            queued_payload.setdefault("source_version_id", job.source_version_id)
+            parameters = queued_payload
         domain = str(parameters.pop("domain"))
         operation = str(parameters.pop("operation"))
-        dataset, version, frame = _load_dataset(db, app.state.storage, job.dataset_id, job.source_version_id)
+        dataset, version, frame = _load_dataset(db, app.state.storage, job.dataset_id, job.source_version_id, expected_tenant_id=job.tenant_id)
         services = _services(parameters)
         artifact_ids = []
         if domain == "forecasting":
@@ -759,6 +776,8 @@ def _execute_background_job(app: Any, job_id: str) -> None:
             job.error_details = {"code": exc.code if isinstance(exc, IntelligenceError) else "JOB_FAILED", "message": exc.message if isinstance(exc, IntelligenceError) else str(exc), "details": exc.details if isinstance(exc, IntelligenceError) else {}}
             job.completed_at = utc_now()
             db.commit()
+        if raise_on_error:
+            raise
     finally:
         db.close()
 
@@ -772,7 +791,18 @@ def create_intelligence_job(dataset_id: str, request: Request, background_tasks:
         if domain not in {"forecasting", "ml", "unsupervised", "data_engineering", "orchestration"} or not operation:
             raise IntelligenceError("INVALID_JOB", "A supported domain and operation are required.")
         dataset, version, _ = _load_dataset(db, request.app.state.storage, dataset_id, payload.get("source_version_id"))
-        job = AutomationRun(dataset_id=dataset.id, source_version_id=version.id, action=f"intelligence.{domain}.{operation}", job_type=f"{domain}.{operation}", parameters=json_safe(payload), idempotency_key=payload.get("idempotency_key"), correlation_id=payload.get("correlation_id") or str(uuid4()), status="QUEUED", progress=0.0, result=None, artifact_ids=[], error_details=None, created_at=utc_now())
+        actor = getattr(request.state, "actor", None)
+        tenant_id = actor.tenant_id if actor is not None else (dataset.tenant_id or "default")
+        if request.app.state.settings.job_worker_enabled:
+            queued = DurableJobQueue(request.app.state.SessionLocal, worker_id=request.app.state.settings.worker_id).enqueue(
+                tenant_id=tenant_id,
+                action=f"intelligence.{domain}.{operation}",
+                context={"dataset_id": dataset.id, "version_id": version.id},
+                payload=json_safe(payload),
+                idempotency_key=payload.get("idempotency_key"),
+            )
+            return {"job_id": queued.id, "status": queued.status, "progress": queued.progress, "dataset_id": dataset.id, "source_version_id": version.id, "correlation_id": queued.correlation_id, "durable": True}
+        job = AutomationRun(tenant_id=tenant_id, dataset_id=dataset.id, source_version_id=version.id, action=f"intelligence.{domain}.{operation}", job_type=f"{domain}.{operation}", parameters=json_safe(payload), idempotency_key=payload.get("idempotency_key"), correlation_id=payload.get("correlation_id") or str(uuid4()), status="QUEUED", progress=0.0, result=None, artifact_ids=[], error_details=None, created_at=utc_now())
         db.add(job)
         db.commit()
         background_tasks.add_task(_execute_background_job, request.app, job.id)
@@ -788,7 +818,11 @@ def create_intelligence_job(dataset_id: str, request: Request, background_tasks:
 def get_intelligence_job(job_id: str, request: Request):
     db = request.app.state.SessionLocal()
     try:
-        job = db.query(AutomationRun).filter(AutomationRun.id == job_id).first()
+        actor = getattr(request.state, "actor", None)
+        query = db.query(AutomationRun).filter(AutomationRun.id == job_id)
+        if actor is not None:
+            query = query.filter(AutomationRun.tenant_id == actor.tenant_id)
+        job = query.first()
         if job is None:
             raise IntelligenceError("JOB_NOT_FOUND", "Intelligence job was not found.", status_code=404)
         return {"job_id": job.id, "job_type": job.job_type, "dataset_id": job.dataset_id, "source_version_id": job.source_version_id, "status": job.status, "progress": job.progress, "result": job.result, "artifact_ids": job.artifact_ids, "error": job.error_details, "correlation_id": job.correlation_id, "created_at": job.created_at.isoformat() if job.created_at else None, "started_at": job.started_at.isoformat() if job.started_at else None, "completed_at": job.completed_at.isoformat() if job.completed_at else None}

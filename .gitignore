@@ -33,6 +33,7 @@ storage/**/*.part
 /preview-*.log
 /artifacts/
 /dist/
+/backups/
 
 # Local input data used for manual testing
 /enterprise_retail_sales.csv

@@ -79,6 +79,7 @@ class DatasetImporter:
     async def import_file(self, db: Session, upload: UploadFile, **kwargs) -> dict:
         dataset_id = str(uuid.uuid4())
         original_filename = self._safe_filename(upload.filename or "upload.csv")
+        tenant_id = str(kwargs.pop("tenant_id", "default") or "default")
         
         temp_dir = Path(self.storage.root) / "temp"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +104,7 @@ class DatasetImporter:
             version_number = 1
             dataset = Dataset(
                 id=dataset_id,
+                tenant_id=tenant_id,
                 name=original_filename,
                 source_type=file_type,
                 original_filename=original_filename,
