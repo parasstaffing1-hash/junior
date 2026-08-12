@@ -48,6 +48,8 @@ out of request logs and the database.
 2. Apply the Alembic migrations before accepting traffic.
 3. Create tenants, users, workspace memberships, policies, and scoped API keys
    through the security API.
+   In the web workspace, enter the tenant ID and API key under Settings; the
+   browser keeps them in session storage only and attaches them to API calls.
 4. Configure the external BI/identity connectors only in the deployment
    environment. Integration endpoints are approval-gated and never persist
    bearer tokens.
@@ -66,10 +68,15 @@ out of request logs and the database.
 - `GET /api/v1/platform/production-readiness` is the release gate.
 - `GET /api/v1/platform/cost-report` reports rows scanned, compute time, and
   configured compute-unit cost by dataset and operation.
+- `GET /api/v1/platform/observability` reports bounded route latency/error SLO
+  evidence, queue state, and current storage for an administrator.
 - Audit records are written for API requests and security administration.
 - Review threads, comments, approval evidence, shared collections, and bounded
   notebook runs are tenant-scoped and auditable; notebook execution intentionally
   uses an allowlisted analysis DSL rather than arbitrary code execution.
+- Retention runs default to dry-run. Configure legal holds before cleanup;
+  execution requires an administrator and ticket/evidence payload, and versions
+  with downstream lineage are protected from deletion.
 - Dataset imports, automation actions, intelligence jobs, schedules, retries,
   and worker leases are tenant-scoped and persisted in PostgreSQL.
 

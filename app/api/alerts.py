@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from app.core.alerts.service import AlertDeliveryError, evaluate_and_deliver, validate_alert_definition
+from app.core.alerts.discovery import discover_and_evaluate_metrics
 from app.core.security import SecurityError, authorize
 from app.models.all import AlertDelivery, AlertRule
 
@@ -59,6 +60,30 @@ def evaluate_alerts(payload: dict[str, Any], request: Request):
     db = request.app.state.SessionLocal()
     try:
         return evaluate_and_deliver(db, tenant_id=actor.tenant_id, snapshot=snapshot, source_type=str(payload.get("source_type", "metric_snapshot")), source_id=payload.get("source_id"), approved=bool(payload.get("approved", False) and actor.is_admin), timeout_seconds=request.app.state.settings.request_timeout_seconds)
+    finally:
+        db.close()
+
+
+@router.post("/discover")
+def discover_alert_metrics(payload: dict[str, Any], request: Request):
+    """Discover published dataset metrics and feed their snapshots to alert rules."""
+    actor = _actor(request)
+    workspace_id = str(payload.get("workspace_id", "default"))
+    authorize(actor, "analyze", workspace_id=workspace_id)
+    dataset_id = str(payload.get("dataset_id", "")).strip()
+    if not dataset_id:
+        raise SecurityError("DATASET_REQUIRED", "dataset_id is required.", status_code=422)
+    db = request.app.state.SessionLocal()
+    try:
+        return discover_and_evaluate_metrics(
+            db,
+            request.app.state.storage,
+            tenant_id=actor.tenant_id,
+            dataset_id=dataset_id,
+            workspace_id=workspace_id,
+            approved=bool(payload.get("approved", False) and actor.is_admin),
+            timeout_seconds=request.app.state.settings.request_timeout_seconds,
+        )
     finally:
         db.close()
 

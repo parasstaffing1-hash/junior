@@ -22,6 +22,9 @@ ACTIONS={
     "report.excel":{"method":"POST","path":"/api/v1/excel-reports/generate","requires":[]},
     "bi.report":{"method":"GET","path":"/api/v1/datasets/{dataset_id}/bi_report","requires":["dataset_id"]},
     "alert.evaluate":{"method":"POST","path":"/api/v1/alerts/evaluate","requires":[]},
+    "alert.discover":{"method":"POST","path":"/api/v1/alerts/discover","requires":["dataset_id"]},
+    "ingestion.database":{"method":"POST","path":"/api/v1/datasets/import/database","requires":["connection_ref"]},
+    "ingestion.rest":{"method":"POST","path":"/api/v1/datasets/import/rest","requires":["connection_ref"]},
 }
 
 FINAL={"COMPLETED","FAILED","CANCELLED"}

@@ -538,6 +538,57 @@ class SecurityPolicy(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
+class RetentionPolicy(Base):
+    """Tenant-scoped retention rule; execution is explicit and approval-gated."""
+
+    __tablename__ = "retention_policies"
+    __table_args__ = (UniqueConstraint("tenant_id", "workspace_id", "name", name="uq_retention_policy_scope_name"),)
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    workspace_id = Column(String, nullable=False, default="default", index=True)
+    name = Column(String, nullable=False)
+    definition = Column(JSON, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class RetentionHold(Base):
+    """Active legal hold preventing retention deletion for a dataset."""
+
+    __tablename__ = "retention_holds"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    created_by = Column(String, nullable=False)
+    released_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    released_at = Column(DateTime, nullable=True)
+
+
+class RetentionRun(Base):
+    """Immutable evidence for a retention evaluation or approved execution."""
+
+    __tablename__ = "retention_runs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    policy_id = Column(String, ForeignKey("retention_policies.id"), nullable=True, index=True)
+    mode = Column(String, nullable=False)
+    status = Column(String, nullable=False, index=True)
+    candidates = Column(JSON, nullable=False)
+    evidence = Column(JSON, nullable=False)
+    requested_by = Column(String, nullable=False)
+    approved_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    executed_at = Column(DateTime, nullable=True)
+
+
 class JobSchedule(Base):
     """Database-backed schedule; a worker materializes due executions."""
 

@@ -376,6 +376,21 @@
                                     <div><span>API</span><strong id="settings-api-status" class="status-chip warning">Checking...</strong></div>
                                     <div><span>Runtime</span><strong id="settings-runtime-status" class="status-chip neutral">Local workspace</strong></div>
                                 </div>
+                                <div class="settings-form-grid settings-credentials" aria-label="Deployment credentials">
+                                    <label>Tenant ID
+                                        <input id="settings-tenant-id" class="intelligence-input" type="text" autocomplete="organization" placeholder="Required when tenant enforcement is enabled">
+                                        <small>Sent as X-Tenant-ID for this browser session.</small>
+                                    </label>
+                                    <label>API key
+                                        <input id="settings-api-key" class="intelligence-input" type="password" autocomplete="off" placeholder="Optional local session key">
+                                        <small>Stored in session storage only; never sent to the database.</small>
+                                    </label>
+                                </div>
+                                <div class="settings-actions">
+                                    <button class="btn btn-primary" type="button" onclick="App.saveSessionCredentials()"><i class="fa-solid fa-key"></i> Save session access</button>
+                                    <button class="btn" type="button" onclick="App.clearSessionCredentials()"><i class="fa-solid fa-right-from-bracket"></i> Clear access</button>
+                                    <span id="settings-credentials-status" class="settings-save-status" role="status"></span>
+                                </div>
                                 <button class="btn" type="button" onclick="App.refreshSettingsStatus()"><i class="fa-solid fa-rotate"></i> Check connection</button>
                             </section>
 

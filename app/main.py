@@ -79,6 +79,7 @@ from app.core.intake.importer import DatasetImporter
 from app.core.intelligence.common import IntelligenceError, bounded_frame
 from app.core.jobs.queue import DurableJobQueue
 from app.core.alerts.service import evaluate_and_deliver
+from app.core.alerts.discovery import discover_and_evaluate_metrics
 from app.api.intelligence import router as intelligence_router
 from app.api.geographic import router as geographic_router
 from app.api.conversation import router as conversation_router
@@ -90,11 +91,13 @@ from app.api.metrics import router as metrics_router
 from app.api.integrations import router as integrations_router
 from app.api.storage import router as storage_router
 from app.api.ingestion import router as ingestion_router
+from app.api.ingestion import import_database as import_database_connector, import_rest as import_rest_connector
 from app.api.alerts import router as alerts_router
 from app.api.sql_intelligence import router as sql_intelligence_router
 from app.api.catalog import router as catalog_router
 from app.api.collaboration import router as collaboration_router
 from app.api.notebooks import router as notebooks_router
+from app.api.retention import router as retention_router
 from app.core.bi.report_service import build_bi_report
 from app.core.bi.export_formats import INTERACTIVE_EXPORT_FORMATS, resolve_export_formats
 from app.core.projects.catalog import FLAGSHIP_PROJECT_IDS, get_project_spec, list_flagship_project_specs, list_project_specs
@@ -786,6 +789,37 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 bucket["compute_seconds"] = round(bucket["compute_ms"] / 1000, 3)
                 bucket["estimated_cost"] = round(bucket["compute_ms"] / 1000 * unit_cost, 6)
             return {"tenant_id": actor.tenant_id if actor is not None else "default", "dataset_id": dataset_id, "cost_per_compute_second": unit_cost, "totals": {"rows_scanned": total_rows, "compute_ms": round(total_ms, 3), "compute_seconds": round(total_ms / 1000, 3), "estimated_cost": round(total_ms / 1000 * unit_cost, 6)}, "datasets": by_dataset, "currency": os.getenv("COST_CURRENCY", "compute_units" if unit_cost == 0 else "configured_currency")}
+        finally:
+            db.close()
+
+    @app.get("/api/v1/platform/observability")
+    def platform_observability(request: Request):
+        actor = getattr(request.state, "actor", None)
+        if actor is None:
+            raise SecurityError("AUTHENTICATION_REQUIRED", "A security principal is required.")
+        authorize(actor, "manage_security")
+        db = request.app.state.SessionLocal()
+        try:
+            datasets = db.query(Dataset).filter(Dataset.tenant_id == actor.tenant_id).all()
+            current_storage_bytes = 0
+            for dataset in datasets:
+                version = db.query(DatasetVersion).filter(DatasetVersion.id == dataset.current_version_id).first()
+                if version is not None:
+                    path = request.app.state.storage.resolve(version.storage_path)
+                    if path.is_file():
+                        current_storage_bytes += path.stat().st_size
+            jobs = db.query(AutomationRun).filter(AutomationRun.tenant_id == actor.tenant_id).all()
+            queue_counts: dict[str, int] = {}
+            for job in jobs:
+                queue_counts[job.status] = queue_counts.get(job.status, 0) + 1
+            return {
+                "tenant_id": actor.tenant_id,
+                "http": request.app.state.metrics.snapshot(),
+                "storage": {"dataset_count": len(datasets), "current_version_bytes": current_storage_bytes},
+                "queue": {"worker_enabled": request.app.state.settings.job_worker_enabled, "counts": queue_counts},
+                "slo_targets": {"report_interaction_p95_seconds": 3.0, "api_error_rate": 0.01},
+                "external_telemetry": {"tracing_backend": "deployment_configured", "capacity_metrics": "deployment_configured"},
+            }
         finally:
             db.close()
 
@@ -1761,6 +1795,20 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                     approved=bool(action_payload.get("approved", False) and str(run.tenant_id) != "default"),
                     timeout_seconds=app.state.settings.request_timeout_seconds,
                 )
+            elif action == "alert.discover":
+                run.result = discover_and_evaluate_metrics(
+                    db,
+                    app.state.storage,
+                    tenant_id=run.tenant_id or "default",
+                    dataset_id=str(dataset_id),
+                    workspace_id=str(context.get("workspace_id") or "default"),
+                    approved=bool(action_payload.get("approved", False) and str(run.tenant_id) != "default"),
+                    timeout_seconds=app.state.settings.request_timeout_seconds,
+                )
+            elif action == "ingestion.database":
+                run.result = import_database_connector(action_payload, req)
+            elif action == "ingestion.rest":
+                run.result = import_rest_connector(action_payload, req)
             else:
                 raise Exception(f"Action '{action}' is not supported in background execution.")
             
@@ -1889,6 +1937,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.include_router(catalog_router)
     app.include_router(collaboration_router)
     app.include_router(notebooks_router)
+    app.include_router(retention_router)
     app.include_router(connectors_router)
 
     return app

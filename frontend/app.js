@@ -28,6 +28,21 @@ const App = {
     conversationId: null,
     conversationHistory: [],
 
+    /** Add deployment credentials to API calls without persisting them in the database. */
+    apiFetch(input, options = {}) {
+        const headers = new Headers(options.headers || {});
+        try {
+            const apiKey = window.sessionStorage.getItem('automated-data-analyst.api-key');
+            const tenantId = window.sessionStorage.getItem('automated-data-analyst.tenant-id');
+            if (apiKey && !headers.has('Authorization') && !headers.has('X-API-Key')) headers.set('Authorization', `Bearer ${apiKey}`);
+            if (tenantId && !headers.has('X-Tenant-ID')) headers.set('X-Tenant-ID', tenantId);
+        } catch (_) {
+            // Private browsing or storage restrictions should not break local mode.
+        }
+        const nativeFetch = window.__jdaNativeFetch || window.fetch.bind(window);
+        return nativeFetch(input, { ...options, headers });
+    },
+
     // Views
     views: {
         home: document.getElementById('view-home'),
@@ -37,6 +52,12 @@ const App = {
     },
 
     init() {
+        // Existing feature modules use fetch directly; wrap it once so every
+        // API request carries the current deployment tenant/session credentials.
+        if (!window.__jdaNativeFetch) {
+            window.__jdaNativeFetch = window.fetch.bind(window);
+            window.fetch = (...args) => this.apiFetch(...args);
+        }
         try {
             this.currentDashboardTemplateId = window.localStorage.getItem('automated-data-analyst.dashboard-template') || this.currentDashboardTemplateId;
         } catch (_) {
@@ -108,6 +129,10 @@ const App = {
         if (template) template.value = this.currentDashboardTemplateId || 'executive';
         const runtime = document.getElementById('settings-runtime-status');
         if (runtime) runtime.textContent = this.currentDatasetId ? `Dataset selected: ${this.currentDatasetId}` : 'Local workspace';
+        const tenant = document.getElementById('settings-tenant-id');
+        try {
+            if (tenant) tenant.value = window.sessionStorage.getItem('automated-data-analyst.tenant-id') || '';
+        } catch (_) { /* keep the field empty when session storage is unavailable */ }
         this.refreshSettingsStatus();
     },
 
@@ -117,11 +142,15 @@ const App = {
         status.className = 'status-chip warning';
         status.textContent = 'Checking...';
         try {
-            const response = await fetch('/health/ready', { cache: 'no-store' });
+            let endpoint = '/health/ready';
+            try {
+                endpoint = window.sessionStorage.getItem('automated-data-analyst.api-key') ? '/api/v1/security/session' : endpoint;
+            } catch (_) { /* fall back to public health */ }
+            const response = await this.apiFetch(endpoint, { cache: 'no-store' });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.detail || 'API unavailable');
             status.className = 'status-chip success';
-            status.textContent = payload.status === 'ready' ? 'Ready' : 'Connected';
+            status.textContent = payload.tenant_id ? `Authenticated: ${payload.tenant_id}` : (payload.status === 'ready' ? 'Ready' : 'Connected');
         } catch (error) {
             status.className = 'status-chip danger';
             status.textContent = 'Unavailable';
@@ -141,6 +170,40 @@ const App = {
         if (status) status.textContent = 'Saved locally';
         this.showToast('Workspace settings saved.');
         if (this.currentDatasetId) this.selectDashboardTemplate(template);
+    },
+
+    saveSessionCredentials() {
+        const apiKey = document.getElementById('settings-api-key')?.value.trim() || '';
+        const tenantId = document.getElementById('settings-tenant-id')?.value.trim() || '';
+        try {
+            if (apiKey) window.sessionStorage.setItem('automated-data-analyst.api-key', apiKey);
+            else window.sessionStorage.removeItem('automated-data-analyst.api-key');
+            if (tenantId) window.sessionStorage.setItem('automated-data-analyst.tenant-id', tenantId);
+            else window.sessionStorage.removeItem('automated-data-analyst.tenant-id');
+            const input = document.getElementById('settings-api-key');
+            if (input) input.value = '';
+            const status = document.getElementById('settings-credentials-status');
+            if (status) status.textContent = apiKey || tenantId ? 'Session access saved' : 'Session access cleared';
+            this.showToast(apiKey || tenantId ? 'Session access saved for this tab.' : 'Session access cleared.');
+            this.refreshSettingsStatus();
+        } catch (_) {
+            this.showToast('Browser session storage is unavailable.');
+        }
+    },
+
+    clearSessionCredentials() {
+        try {
+            window.sessionStorage.removeItem('automated-data-analyst.api-key');
+            window.sessionStorage.removeItem('automated-data-analyst.tenant-id');
+        } catch (_) { /* ignore restricted storage */ }
+        const key = document.getElementById('settings-api-key');
+        const tenant = document.getElementById('settings-tenant-id');
+        const status = document.getElementById('settings-credentials-status');
+        if (key) key.value = '';
+        if (tenant) tenant.value = '';
+        if (status) status.textContent = 'Session access cleared';
+        this.showToast('Session access cleared.');
+        this.refreshSettingsStatus();
     },
 
     resetSettings() {

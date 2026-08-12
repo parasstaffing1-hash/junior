@@ -74,6 +74,7 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Geographic resolver / mappings | `POST /api/v1/geographic/resolve` and `/api/v1/geographic/mappings` |
 | Location analytics / saved maps | `POST /api/v1/datasets/{dataset_id}/geographic/location-analytics`; `GET/POST /api/v1/geographic/saved-maps` |
 | Security session/API keys/policies/audit | `GET /api/v1/security/session`; `POST /api/v1/security/tenants`, `/users`, `/api-keys`, `/policies`; `GET /api/v1/security/audit`; production requires `AUTH_MODE=api_key`, `ADMIN_API_KEY`, and `X-Tenant-ID` |
+| Retention and legal holds | `POST/GET /api/v1/security/retention/policies`; `POST/GET /holds`; `POST /holds/{id}/release`; `POST /evaluate` supports dry-run and administrator-approved deletion with lineage protection and evidence |
 | PII profiling/masking preview | `POST /api/v1/security/pii/profile` |
 | Durable jobs and schedules | `POST/GET /api/v1/jobs`; `POST /api/v1/jobs/schedules`; `GET /api/v1/jobs/worker/status`; run `python scripts/run_worker.py` as a separate worker |
 | Connectors and schema contracts | `GET /api/v1/connectors/catalog`; `POST /api/v1/connectors/test`; `POST /api/v1/connectors/schema/validate` |
@@ -82,8 +83,10 @@ The default local configuration uses `analytics.db` and the `storage` directory.
 | Natural-language SQL | `POST /api/v1/datasets/{dataset_id}/sql/natural-language` emits deterministic read-only SQL, validation, execution, and evidence |
 | Feature store materialization | `POST /api/v1/datasets/{dataset_id}/orchestration/feature_store` with `materialize=true`; `GET /api/v1/feature-sets/{asset_id}/lookup` |
 | Model serving and rollback | `POST /api/v1/models/{model_version_id}/predict`; `POST /api/v1/models/{model_id}/rollback` (approval/status gated) |
-| Alert rules and delivery | `POST/GET /api/v1/alerts/rules`; `POST /api/v1/alerts/evaluate`; `GET /api/v1/alerts/deliveries` (webhook secret + approval gated) |
+| Alert rules and delivery | `POST/GET /api/v1/alerts/rules`; `POST /api/v1/alerts/evaluate` or `/alerts/discover` for scheduled published-metric discovery; `GET /api/v1/alerts/deliveries` (webhook secret + approval gated) |
+| Scheduled connector micro-batches | Durable schedules can run `ingestion.database` or `ingestion.rest` with secret references and watermark/contract enforcement; log-based CDC and streaming brokers remain external gates |
 | Dependency and cost evidence | `GET /api/v1/datasets/{dataset_id}/dependency-graph`; `GET /api/v1/platform/cost-report` |
+| Operational SLO evidence | `GET /api/v1/platform/observability` (admin-only) reports bounded route p50/p95/p99 latency, errors, queue state, current storage, and deployment telemetry boundaries; `/metrics` exposes Prometheus counters |
 | Searchable governed catalog | `GET /api/v1/catalog/search` searches tenant datasets, current schemas, and workspace assets |
 | Git/dbt handoff | `dbt/` contains a source-controlled staging contract and tests; warehouse profile/execution stays deployment-specific |
 | Column-level lineage | `GET /api/v1/datasets/{dataset_id}/lineage` includes version-column nodes and recorded transformation edges |
@@ -102,6 +105,7 @@ The cumulative forecasting, data-science, MLOps, data-engineering, and orchestra
 - **Power BI:** the PBIP semantic model records its fact-table grain, dimensions, relationships, measure definitions, date logic, RLS publication gate, and performance decisions in `model_contract.json` and `MODEL_DESIGN.md`. Client identities are never invented; the included RLS role fails closed until an approved mapping is configured.
 - **Senior BI engineering:** every PBIP package also includes an enterprise scale architecture, PostgreSQL partition/index/materialized-view pattern, incremental-refresh M function, advanced DAX library, Tabular Editor calculation-group script, and dev/test/prod CI/CD scaffold. These are generated engineering assets, not false claims that a customer Fabric/Power BI tenant, gateway, Entra identity, capacity, or licensed desktop tool has been operated.
 - **Staff operating modes:** the Staff BI Control Center sequences eight stages—intake/quality, modeling, SQL evidence, BI delivery, engineering, forecast/ML/monitoring, governance, and operations. Automatic mode generates bounded, reviewable checks; manual mode exposes stage controls and keeps decisions explicit. Publishing, deployment, model promotion, destructive replay, external alerts, and external Power BI/Fabric/cloud side effects remain approval-gated and connector-dependent.
+- **Production web authentication:** when `AUTH_MODE=api_key` and tenant enforcement are enabled, enter the scoped API key and tenant ID in Settings. The frontend attaches them to API calls using tab-scoped session storage; secrets are not written to the platform database.
 - **Report performance:** generated BI reports are cached by immutable dataset version, template, and filters in a bounded LRU cache (`BI_REPORT_CACHE_SIZE`, default `3`), so dashboard refreshes and format downloads reuse the same validated artifacts instead of rebuilding the model.
 - **Business analysis:** decision briefs use the explicit `problem → analysis → evidence → insights → recommendation` contract, trace evidence to source columns, and separate observed association from causal claims.
 - **Portfolio:** the UI leads with three end-to-end flagships—Sales/Revenue, Customer/RFM, and Supply Chain/Operations—while retaining the other 17 projects as focused skill drills.

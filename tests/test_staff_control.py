@@ -62,3 +62,6 @@ def test_settings_view_is_wired_to_the_workspace_shell(client):
     assert 'id="view-settings"' in page.text
     assert 'id="settings-dashboard-template"' in page.text
     assert 'id="settings-api-status"' in page.text
+    assert 'id="settings-tenant-id"' in page.text
+    assert 'id="settings-api-key"' in page.text
+    assert "Save session access" in page.text
