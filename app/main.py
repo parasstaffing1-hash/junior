@@ -87,6 +87,7 @@ from app.api.bi_readiness import router as bi_readiness_router
 from app.api.security import router as security_router
 from app.api.jobs import router as jobs_router
 from app.api.connectors import router as connectors_router
+from app.api.mis import router as mis_router
 from app.api.metrics import router as metrics_router
 from app.api.integrations import router as integrations_router
 from app.api.storage import router as storage_router
@@ -401,6 +402,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
                 frame,
                 dataset_name=dataset.name,
                 source_version_id=version.id,
+                source_sha256=version.sha256,
                 filters={
                     "country": country, "product": product, "segment": segment, "store": store,
                     "carrier": carrier, "origin": origin, "destination": destination, "route": route,
@@ -1939,6 +1941,7 @@ def create_app(*, database_url: str | None = None, storage_root: str | Path | No
     app.include_router(notebooks_router)
     app.include_router(retention_router)
     app.include_router(connectors_router)
+    app.include_router(mis_router)
 
     return app
 

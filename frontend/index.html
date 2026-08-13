@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Automated Data Analyst v1.0</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -753,6 +754,19 @@ SELECT * FROM ranked LIMIT 50;</textarea>
                                     <div id="staff-capability-summary" class="staff-capability-summary"></div>
                                     <div id="staff-control-results" class="intelligence-results"><p class="empty-text">Build a plan to see automatic actions, manual controls, evidence, and approval gates.</p></div>
                                 </div>
+                                <details class="staff-advanced-planner" open>
+                                    <summary><i class="fa-solid fa-file-excel"></i> MIS / Excel automation plan</summary>
+                                    <p class="muted-copy">Create a lineage-aware recurring MIS handoff. Manual and automatic modes are supported; Excel Desktop, signed macros, native PivotTables/slicers and Microsoft 365 delivery remain explicit approval gates.</p>
+                                    <div class="intelligence-form-grid">
+                                        <label> MIS mode<select id="mis-mode" class="intelligence-select"><option value="manual">Manual — operator approves each handoff</option><option value="automatic">Automatic — scheduled generation with approval gates</option></select></label>
+                                        <label>Report name<input id="mis-report-name" class="intelligence-input" type="text" placeholder="Monthly management information report"></label>
+                                        <label>Delivery targets<input id="mis-delivery" class="intelligence-input" type="text" value="local_download" placeholder="local_download, sharepoint, outlook"></label>
+                                        <label>Schedule (automatic mode)<input id="mis-cron" class="intelligence-input" type="text" value="0 8 * * 1-5" placeholder="Cron expression"></label>
+                                        <label>Timezone<input id="mis-timezone" class="intelligence-input" type="text" value="Asia/Kolkata"></label>
+                                    </div>
+                                    <div class="intelligence-actions" style="margin-top:12px"><button class="btn" type="button" onclick="App.loadMISCatalog()"><i class="fa-solid fa-circle-info"></i> Show gates</button><button class="btn btn-primary" type="button" onclick="App.buildMISPlan()"><i class="fa-solid fa-file-circle-check"></i> Create MIS plan</button></div>
+                                    <div id="mis-automation-results" class="intelligence-results"><p class="empty-text">Choose a mode and create a plan. The saved plan will be linked to this dataset version and recorded in audit history.</p></div>
+                                </details>
                                 <details class="staff-advanced-planner"><summary>Advanced orchestrator controls</summary>
                                     <div class="bi-report-header"><div><h3><i class="fa-solid fa-wand-magic-sparkles"></i> Dataset Orchestrator</h3><p>Coordinates analysis, forecasting, ML, governance, monitoring, and data engineering.</p></div><button class="btn btn-primary" onclick="App.runOrchestration()"><i class="fa-solid fa-play"></i> Run orchestrator</button></div>
                                 <div class="intelligence-form-grid">

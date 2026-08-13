@@ -23,6 +23,7 @@ ASSET_TYPES = {
     "monitoring_policy",
     "experiment",
     "geographic_map",
+    "mis_automation_plan",
 }
 ASSET_STATUSES = {"draft", "validated", "published", "deprecated"}
 
@@ -46,6 +47,7 @@ REQUIRED_DEFINITION_KEYS = {
     "monitoring_policy": {"checks"},
     "experiment": {"objective"},
     "geographic_map": {"map_type", "dataset_id", "configuration"},
+    "mis_automation_plan": {"contract", "mode", "source", "workflow", "external_gates", "publication"},
 }
 
 

@@ -327,6 +327,7 @@ def run_full_platform_analysis(db: Session, storage: DatasetStorage, dataset_id:
         final_frame,
         dataset_name=dataset.name,
         source_version_id=output_version.id,
+        source_sha256=output_version.sha256,
         output_dir=storage.root / dataset.id / "reports",
         findings=findings.get("findings", []),
         exports=INTERACTIVE_EXPORT_FORMATS,

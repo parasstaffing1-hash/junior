@@ -30,6 +30,7 @@ import pandas as pd
 from app.core.enterprise.bi_architecture import enterprise_bi_blueprint, enterprise_bi_markdown
 from app.core.bi.dax import analyze_dax_measures
 from app.core.bi.power_query import analyze_power_query
+from app.core.bi.semantic_model import build_semantic_model_contract
 
 
 PBIP_SCHEMA = "https://developer.microsoft.com/json-schemas/fabric/pbip/pbipProperties/1.0.0/schema.json"
@@ -94,6 +95,7 @@ def validate_powerbi_project_package(package: bytes) -> dict[str, Any]:
                 "MODEL_DESIGN.md",
                 "RLS_CONFIGURATION.md",
                 "model_contract.json",
+                "advanced_semantic_model.json",
                 "ENTERPRISE_ARCHITECTURE.md",
                 "enterprise_blueprint.json",
                 "engineering/postgresql_scale_pattern.sql",
@@ -592,6 +594,20 @@ def _semantic_model_parts(
             "Imported CSV partitions are deterministic and portable; replace them with governed production sources before scheduled refresh.",
         ],
     }
+    numeric_columns = [item["name"] for item in fact_specs if item["power_type"] in {"int64", "double"}]
+    advanced_design = {
+        "grain": "one row per cleaned source record",
+        "grain_columns": [date_column] if date_column else ([fact_specs[0]["name"]] if fact_specs else []),
+        "grain_confirmed": False,
+        "fact": {"name": "FactData", "columns": [item["name"] for item in fact_specs], "surrogate_key": "fact_sk"},
+        "dimension_columns": [item["source_column"] for item in dimensions if item.get("table") != "DimDate"],
+        "measure_columns": numeric_columns,
+        "date_column": date_column,
+        "storage_mode": "Import",
+        "shared_model": False,
+    }
+    advanced_contract = build_semantic_model_contract([item["name"] for item in fact_specs], advanced_design)
+    contract["advanced_semantic_model"] = advanced_contract
     design_lines = [
         "# POWER BI MODEL DESIGN",
         "",
@@ -618,6 +634,7 @@ def _semantic_model_parts(
         "The generator does not invent client identities or silently grant access.\n"
     )
     entries["model_contract.json"] = _json_bytes(contract)
+    entries["advanced_semantic_model.json"] = _json_bytes(advanced_contract)
     dax_analysis = analyze_dax_measures([{"name": item["name"], "expression": f"{item['name']} := {item['expression']}", "context": "measure"} for item in fact_table["measures"]])
     power_query_analysis = analyze_power_query(_m_expression(modeled, fact_specs))
     contract["local_engineering_review"] = {

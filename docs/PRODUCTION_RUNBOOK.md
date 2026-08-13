@@ -87,6 +87,12 @@ out of request logs and the database.
   surrogate-key strategy, SCD history, date roles, bridges, many-to-many
   relationships, explicit measures, and reference DDL before publishing to a
   target semantic engine.
+- MIS workbooks are governed by `GET /api/v1/mis/catalog` and
+  `POST /api/v1/datasets/{dataset_id}/mis/automation-plan`. Review the generated
+  `MIS Automation` sheet and the persisted `mis_automation_plan` workspace asset
+  before scheduling or distributing a report. Automatic mode requires an
+  explicit schedule; native PivotTables/slicers, signed `.xlsm` macros, Excel
+  Desktop refresh and Microsoft 365 delivery remain external approval gates.
 - DAX review is static and evidence-producing locally. Run the DAX analyzer,
   then complete target-engine reconciliation, DAX Studio server timings,
   formula/storage-engine review, and RLS/OLS tests before release.
@@ -105,6 +111,12 @@ Run these with real non-production service accounts before public launch:
 - Create and refresh a Power BI/Fabric semantic model, verify incremental
   refresh, RLS, gateway/capacity behavior, and export/open behavior in the
   target client. Validate Tableau output separately if enabled.
+- Generate an MIS plan in both manual and automatic modes; verify source
+  version/hash lineage, reconciliation and exception controls, workspace-asset
+  persistence and audit history. With approved Microsoft Graph/Excel runner
+  credentials, separately test native refresh, signed macro policy,
+  PivotTable/slicer synchronization, SharePoint/OneDrive permissions and
+  Outlook recipient controls.
 - Exercise retries, worker restart, stale lease recovery, scheduled jobs,
   backup/restore, audit review, rate limiting, CORS, and cross-tenant denial.
 - Load-test the real deployment topology with representative file sizes and

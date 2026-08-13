@@ -1853,6 +1853,54 @@ const App = {
         await this.intelligenceRequest(`/api/v1/datasets/${encodeURIComponent(this.currentDatasetId)}/orchestrate`, payload, 'staff-control-results', 'Running bounded automatic checks and approval gates...');
     },
 
+    async loadMISCatalog() {
+        const container = document.getElementById('mis-automation-results');
+        if (container) container.innerHTML = '<div class="spinner-small"></div> Loading MIS delivery gates...';
+        try {
+            const response = await fetch('/api/v1/mis/catalog');
+            const catalog = await response.json();
+            if (!response.ok) throw new Error(catalog.error?.message || 'MIS catalog unavailable.');
+            const gates = (catalog.external_gates || []).map(gate => `<span class="status-chip warning">${this.escapeHtml(gate.replace(/_/g, ' '))}</span>`).join(' ');
+            if (container) container.innerHTML = `<div class="project-status warning"><strong>External gates</strong><div style="margin-top:8px">${gates}</div><small style="display:block;margin-top:8px">Server-side macros and silent distribution are disabled. Configure and approve the external Excel/Microsoft 365 runner before delivery.</small></div>`;
+        } catch (error) {
+            if (container) container.innerHTML = `<p class="text-red">${this.escapeHtml(error.message || 'MIS catalog unavailable.')}</p>`;
+        }
+    },
+
+    renderMISPlan(plan, asset) {
+        const container = document.getElementById('mis-automation-results');
+        if (!container) return;
+        const source = plan.source || {};
+        const gates = (plan.external_gates || []).map(gate => `<li><strong>${this.escapeHtml(gate.id.replace(/_/g, ' '))}</strong> — ${this.escapeHtml(gate.status)}<br><small>${this.escapeHtml(gate.reason)}</small></li>`).join('');
+        const workflow = (plan.workflow || []).map(step => `<tr><td>${this.escapeHtml(step.step.replace(/_/g, ' '))}</td><td>${this.escapeHtml(step.owner)}</td><td>${this.escapeHtml(step.status)}</td></tr>`).join('');
+        container.innerHTML = `<div class="project-status warning"><strong>${this.escapeHtml(plan.status)}</strong> · ${this.escapeHtml(plan.mode)} mode · workspace asset ${this.escapeHtml(asset?.id || 'created')}<br><small>Source version: ${this.escapeHtml(source.source_version_id || 'not supplied')} · ${this.escapeHtml(source.row_count ?? 0)} rows · publication remains blocked until approval and external gates are complete.</small></div><div class="bi-contract-summary"><strong>Local outputs</strong><span>XLSX with controls, formulas, Power Query plan and MIS Automation sheet</span><span>Power BI PBIP and Tableau TWBX exports remain available from Reports</span></div><div class="bi-readiness-section"><div class="section-heading"><h4>Workflow</h4><small>Each handoff is explicit and auditable.</small></div><div class="table-container"><table><thead><tr><th>Step</th><th>Owner</th><th>Status</th></tr></thead><tbody>${workflow}</tbody></table></div></div><div class="bi-readiness-blockers"><strong>External gates</strong><ul>${gates}</ul></div>`;
+    },
+
+    async buildMISPlan() {
+        if (!this.currentDatasetId) return this.showToast('Select a dataset before creating an MIS plan.');
+        const container = document.getElementById('mis-automation-results');
+        const mode = document.getElementById('mis-mode')?.value || 'manual';
+        const delivery = this.parseColumnList(document.getElementById('mis-delivery')?.value || 'local_download');
+        const payload = {
+            workspace_id: 'default',
+            mode,
+            report_name: document.getElementById('mis-report-name')?.value?.trim() || undefined,
+            delivery: delivery.length ? delivery : ['local_download'],
+            schedule: mode === 'automatic' ? { cron: document.getElementById('mis-cron')?.value?.trim() || '', timezone: document.getElementById('mis-timezone')?.value?.trim() || 'UTC' } : undefined,
+        };
+        if (container) container.innerHTML = '<div class="spinner-small"></div> Creating lineage-aware MIS plan...';
+        try {
+            const response = await fetch(`/api/v1/datasets/${encodeURIComponent(this.currentDatasetId)}/mis/automation-plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error?.message || 'MIS plan could not be created.');
+            this.renderMISPlan(result.plan, result.workspace_asset);
+            this.showToast('MIS automation plan created and audit-linked.');
+        } catch (error) {
+            if (container) container.innerHTML = `<p class="text-red">${this.escapeHtml(error.message || 'MIS plan could not be created.')}</p>`;
+            this.showToast(error.message || 'MIS plan could not be created.');
+        }
+    },
+
     openStaffStage(stageId) {
         const views = { intake_quality: 'quality', modeling: 'dashboard', sql_analysis: 'sql', bi_delivery: 'reports', engineering: 'data-engineering', forecast_ml_monitoring: 'machine-learning', governance: 'models', operations: 'automation' };
         const view = views[stageId] || 'automation';

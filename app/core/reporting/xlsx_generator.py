@@ -12,6 +12,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.utils import get_column_letter
 
+from app.core.mis_automation import MISAutomationError, build_mis_automation_plan
+
 class ExcelGenerationError(Exception):
     def __init__(self, code, message, details=None):
         self.code = code
@@ -236,6 +238,61 @@ def _mis_control_sheet(wb: Workbook, frame: pd.DataFrame, styles: dict, raw: dic
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=2):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+
+def _mis_automation_sheet(wb: Workbook, plan: dict[str, Any], styles: dict) -> None:
+    """Add the executable handoff contract for recurring MIS operations."""
+    ws = wb.create_sheet(title="MIS Automation")
+    ws["A1"] = "MIS Automation Plan"
+    ws["A1"].font = Font(bold=True, size=18, color="1F4E78")
+    ws.append(["Property", "Value"])
+    _style_header(ws, 2, styles)
+    source = plan.get("source") or {}
+    delivery = plan.get("delivery") or {}
+    rows = [
+        ["Contract", plan.get("contract", "")],
+        ["Status", plan.get("status", "")],
+        ["Mode", plan.get("mode", "manual")],
+        ["Report", plan.get("report_name", "")],
+        ["Dataset ID", source.get("dataset_id") or "not supplied"],
+        ["Source version ID", source.get("source_version_id") or "not supplied"],
+        ["Source SHA-256", source.get("source_sha256") or "not supplied"],
+        ["Source rows", source.get("row_count") if source.get("row_count") is not None else "not supplied"],
+        ["Delivery destinations", ", ".join(delivery.get("destinations") or [])],
+        ["Publication", (plan.get("publication") or {}).get("reason", "")],
+    ]
+    for row in rows:
+        ws.append(row)
+
+    start = ws.max_row + 2
+    ws.cell(start, 1, "Workflow and gates")
+    ws.cell(start, 1).font = styles["title"]["font"]
+    ws.append(["Step", "Owner", "Status", "Control"])
+    _style_header(ws, start + 1, styles)
+    for item in plan.get("workflow") or []:
+        ws.append([item.get("step", ""), item.get("owner", ""), item.get("status", ""), item.get("control", "")])
+
+    gate_start = ws.max_row + 2
+    ws.cell(gate_start, 1, "External integration gates")
+    ws.cell(gate_start, 1).font = styles["title"]["font"]
+    ws.append(["Gate", "Status", "Credential profile", "Reason"])
+    _style_header(ws, gate_start + 1, styles)
+    for item in plan.get("external_gates") or []:
+        ws.append([item.get("id", ""), item.get("status", ""), item.get("credential_profile", ""), item.get("reason", "")])
+
+    check_start = ws.max_row + 2
+    ws.cell(check_start, 1, "Control checklist")
+    ws.cell(check_start, 1).font = styles["title"]["font"]
+    for index, control in enumerate(plan.get("controls") or [], 1):
+        ws.append([index, control])
+
+    for column, width in {"A": 32, "B": 30, "C": 26, "D": 105}.items():
+        ws.column_dimensions[column].width = width
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=4):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    ws.freeze_panes = "A3"
+    ws.auto_filter.ref = f"A2:D{max(2, gate_start + 1 + len(plan.get('external_gates') or []))}"
 
 
 def _analysis_fields(frame: pd.DataFrame) -> tuple[str | None, str | None, str | None]:
@@ -571,6 +628,22 @@ def build_xlsx_bytes(
 
     capability_metadata: dict[str, Any] | None = None
     if isinstance(source_frame, pd.DataFrame) and len(source_frame.columns):
+        report_parameters = report.get("parameters") if isinstance(report.get("parameters"), dict) else {}
+        supplied_plan = manifest.get("mis_automation_plan") or report.get("mis_automation_plan")
+        try:
+            mis_plan = supplied_plan if isinstance(supplied_plan, dict) else build_mis_automation_plan(
+                source_frame.columns,
+                dataset_id=report_parameters.get("dataset_id"),
+                source_version_id=report_parameters.get("source_version_id") or report_parameters.get("version_id"),
+                source_sha256=report_parameters.get("source_sha256"),
+                row_count=len(source_frame),
+                report_name=report.get("title"),
+                mode=str(report_parameters.get("mis_mode", "manual")),
+                schedule=report_parameters.get("mis_schedule"),
+                delivery=report_parameters.get("mis_delivery") or ["local_download"],
+            )
+        except MISAutomationError as exc:
+            raise ExcelGenerationError(exc.code, exc.message, exc.details) from exc
         raw = _raw_data_sheet(wb, source_frame, styles, max_table_rows)
         pivot = _pivot_summary_sheet(wb, source_frame, styles)
         formulas = _formula_lab_sheet(wb, source_frame, styles)
@@ -579,6 +652,7 @@ def build_xlsx_bytes(
         exceptions = _exceptions_sheet(wb, source_frame, styles, max_table_rows)
         reconciliation = _reconciliation_sheet(wb, source_frame, styles, raw)
         _mis_control_sheet(wb, source_frame, styles, raw, exceptions)
+        _mis_automation_sheet(wb, mis_plan, styles)
         _capability_matrix_sheet(wb, styles, raw, pivot, formulas)
         capability_metadata = {
             "raw": raw,
@@ -587,6 +661,7 @@ def build_xlsx_bytes(
             "power_query_steps": power_query["steps"],
             "exceptions": exceptions,
             "reconciliation": reconciliation,
+            "mis_automation_plan": mis_plan,
         }
     
     # Remove default 'Sheet' if others were created
@@ -609,7 +684,7 @@ def build_xlsx_bytes(
         if "Executive Summary" not in test_wb.sheetnames:
             raise ExcelGenerationError("VALIDATION_FAILED", "Executive summary sheet missing after generation.")
         if capability_metadata is not None:
-            required = {"Dashboard", "Raw Data", "Pivot Summary", "Formula Lab", "Power Query", "Workbook Guide", "Exceptions", "Reconciliation", "MIS Control"}
+            required = {"Dashboard", "Raw Data", "Pivot Summary", "Formula Lab", "Power Query", "Workbook Guide", "Exceptions", "Reconciliation", "MIS Control", "MIS Automation"}
             missing = sorted(required.difference(test_wb.sheetnames))
             if missing:
                 raise ExcelGenerationError("VALIDATION_FAILED", "Professional workbook sheets are missing.", {"sheets": missing})

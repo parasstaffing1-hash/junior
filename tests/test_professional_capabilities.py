@@ -93,7 +93,7 @@ def test_professional_excel_and_powerbi_artifacts():
     result = build_project(frame, project_id="superstore_sales_dashboard")
 
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]), data_only=False)
-    required_sheets = {"Dashboard", "Raw Data", "Pivot Summary", "Formula Lab", "Power Query", "Workbook Guide", "Exceptions", "Reconciliation", "MIS Control"}
+    required_sheets = {"Dashboard", "Raw Data", "Pivot Summary", "Formula Lab", "Power Query", "Workbook Guide", "Exceptions", "Reconciliation", "MIS Control", "MIS Automation"}
     assert required_sheets.issubset(workbook.sheetnames)
     formulas = [workbook["Formula Lab"].cell(row=row, column=3).value for row in range(2, 8)]
     assert all(isinstance(value, str) and value.startswith("=") for value in formulas)
@@ -107,6 +107,7 @@ def test_professional_excel_and_powerbi_artifacts():
     assert "MISExceptionsTable" in workbook["Exceptions"].tables
     assert workbook["Reconciliation"]["A2"].value == "Control"
     assert workbook["MIS Control"]["A1"].value == "MIS Automation Control Center"
+    assert workbook["MIS Automation"]["A1"].value == "MIS Automation Plan"
     assert workbook["Dashboard"]._charts
 
     validation = validate_powerbi_project_package(result["powerbi_bytes"])

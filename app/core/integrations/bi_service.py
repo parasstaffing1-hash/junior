@@ -49,10 +49,14 @@ class PowerBIServiceClient:
 
 def integration_catalog() -> list[dict[str, Any]]:
     return [
-        {"id": "powerbi_service", "provider": "Microsoft Power BI Service", "status": "approval_gated", "operations": ["validate_token", "refresh_dataset", "list_refreshes", "publish_model"]},
-        {"id": "fabric", "provider": "Microsoft Fabric", "status": "approval_gated", "operations": ["validate_token", "run_pipeline", "refresh_lakehouse", "refresh_semantic_model"]},
-        {"id": "microsoft_graph", "provider": "Microsoft Graph", "status": "approval_gated", "operations": ["share_workbook", "send_report", "write_sharepoint"]},
-        {"id": "tableau_cloud", "provider": "Tableau Cloud", "status": "approval_gated", "operations": ["publish_workbook", "refresh_datasource"]},
+        {"id": "powerbi_service", "provider": "Microsoft Power BI Service", "status": "approval_gated", "credential_profile": "entra_application_or_delegated_oauth", "operations": ["validate_token", "refresh_dataset", "list_refreshes", "publish_model"]},
+        {"id": "fabric", "provider": "Microsoft Fabric", "status": "approval_gated", "credential_profile": "entra_application_or_delegated_oauth", "operations": ["validate_token", "run_pipeline", "refresh_lakehouse", "refresh_semantic_model"]},
+        {"id": "microsoft_graph", "provider": "Microsoft Graph", "status": "approval_gated", "credential_profile": "microsoft_graph_application_or_delegated_oauth", "operations": ["share_workbook", "send_report", "write_sharepoint", "write_onedrive", "read_permissions"]},
+        {"id": "excel_desktop", "provider": "Excel Desktop or approved hosted Excel runner", "status": "approval_gated", "credential_profile": "excel_desktop_automation", "operations": ["refresh_workbook", "refresh_power_query", "refresh_pivot_cache", "recalculate_formulas", "run_approved_macro"]},
+        {"id": "sharepoint", "provider": "Microsoft SharePoint", "status": "approval_gated", "credential_profile": "microsoft_graph_application_or_delegated_oauth", "operations": ["upload_workbook", "publish_version", "read_permissions"]},
+        {"id": "onedrive", "provider": "Microsoft OneDrive", "status": "approval_gated", "credential_profile": "microsoft_graph_application_or_delegated_oauth", "operations": ["upload_workbook", "publish_version", "read_permissions"]},
+        {"id": "outlook", "provider": "Microsoft Outlook via Graph", "status": "approval_gated", "credential_profile": "microsoft_graph_application_or_delegated_oauth", "operations": ["send_report", "send_scheduled_report"]},
+        {"id": "tableau_cloud", "provider": "Tableau Cloud", "status": "approval_gated", "credential_profile": "tableau_connected_app_or_pat", "operations": ["publish_workbook", "refresh_datasource"]},
     ]
 
 

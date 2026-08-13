@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Production control-plane increment
 
@@ -14,7 +14,9 @@ Updated: 2026-08-12
 - Added static DAX and Power Query/M contract analyzers for context transition, iterators, virtual tables, time intelligence, dynamic measures, query folding, reusable functions, incremental refresh windows, error handling, and schema drift.
 - Extended SQL plan review with complexity, index candidates, partition/materialized-view/stored-procedure signals; added a fail-closed release configuration validator used by CI.
 - Added a reviewable Kubernetes production topology with two API replicas, two workers, readiness/liveness probes, HPA, resource limits, non-root security context, disruption protection, and explicit secret/image/storage placeholders. Compose now requires explicit database credentials and no longer ships a default password.
-- Verification after this increment: 269 regression tests are green, including full 101–300 acceptance coverage, semantic-model/DAX/Power Query/SQL optimization evidence, release validation, PBIP engineering assets, and deployment artifact checks; production readiness remains fail-closed until deployment infrastructure and external credentials are configured.
+- Added a lineage-aware MIS automation plan API and persisted workspace asset with manual/automatic modes, reconciliation and exception controls, Excel/PivotTable/VBA boundaries, Microsoft 365 delivery gates, and audit evidence. Source-backed XLSX artifacts now include the `MIS Automation` sheet.
+- PBIP exports now include `advanced_semantic_model.json` and embed the validated senior modeling contract alongside DAX and Power Query review evidence.
+- Verification after this increment: 273 regression tests are green, including full 101–300 acceptance coverage, semantic-model/DAX/Power Query/SQL optimization evidence, release validation, PBIP engineering assets, deployment artifact checks, and the MIS automation contract; production readiness remains fail-closed until deployment infrastructure and external credentials are configured.
 
 ## Current milestone
 
@@ -101,4 +103,4 @@ Backend capabilities:
 - Live browser flow: India Map Story generated at 1080×1080 with 4/36 regions matched, labels, legend, source and handle verified.
 - Live browser flow: Staff BI Control Center loaded all 8 stages; manual mode returned `READY_FOR_MANUAL_REVIEW`; automatic mode returned `READY_TO_PLAN` with approval gates.
 - Focused staff-control suite: 2 passed.
-- Current regression groups: 253 passed on 2026-08-12, including alert discovery, retention/legal holds, observability evidence, and frontend session-access checks.
+- Current regression groups: 273 passed on 2026-08-13. The focused post-UI/source-lineage suite adds 13 relevant passing tests covering MIS plan persistence, workbook evidence, PBIP advanced-model evidence, airline/general report generation, and API integration gates.

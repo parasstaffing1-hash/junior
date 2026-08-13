@@ -1,4 +1,7 @@
 ﻿method,path,operation_name,domain,tags
+GET,/api/v1/mis/catalog,mis_catalog_api_v1_mis_catalog_get,mis_automation,
+POST,/api/v1/mis/automation-plan/validate,validate_mis_plan_api_v1_mis_automation_plan_validate_post,mis_automation,
+POST,/api/v1/datasets/{dataset_id}/mis/automation-plan,create_mis_automation_plan_api_v1_datasets__dataset_id__mis_automation_plan_post,mis_automation,
 POST,/api/v1/automated-analyst/analyze,analyze_dataset_api_v1_automated_analyst_analyze_post,platform,
 GET,/api/v1/automation/actions,automation_actions_api_v1_automation_actions_get,automation,
 POST,/api/v1/automation/actions,automation_execute_api_v1_automation_actions_post,automation,

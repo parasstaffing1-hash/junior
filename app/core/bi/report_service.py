@@ -120,6 +120,7 @@ def build_bi_report(
     *,
     dataset_name: str,
     source_version_id: str | None = None,
+    source_sha256: str | None = None,
     filters: dict[str, str | None] | None = None,
     template_id: str | None = None,
     output_dir: str | Path | None = None,
@@ -142,6 +143,7 @@ def build_bi_report(
             df,
             dataset_name=dataset_name,
             source_version_id=source_version_id,
+            source_sha256=source_sha256,
             filters=filters,
             template_id=template_id,
             output_dir=output_dir,
@@ -549,6 +551,7 @@ def build_bi_report(
         "revision": 1,
         "parameters": {
             "source_version_id": source_version_id or "",
+            "source_sha256": source_sha256 or "",
             "generated_at": _utc_now().isoformat(),
             "dashboard_template_id": dashboard_template["id"],
             **applied_filters,

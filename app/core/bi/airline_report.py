@@ -166,6 +166,7 @@ def build_airline_bi_report(
     *,
     dataset_name: str,
     source_version_id: str | None = None,
+    source_sha256: str | None = None,
     filters: dict[str, str | None] | None = None,
     template_id: str | None = None,
     output_dir: str | Path | None = None,
@@ -298,7 +299,7 @@ def build_airline_bi_report(
         "subtitle": "U.S. DOT/BTS on-time performance",
         "description": "Source-backed flight reliability, delay and cancellation analysis.",
         "revision": 1,
-        "parameters": {"source_version_id": source_version_id or "", "generated_at": datetime.now(timezone.utc).isoformat(), "dashboard_template_id": dashboard_template["id"], **applied_filters},
+        "parameters": {"source_version_id": source_version_id or "", "source_sha256": source_sha256 or "", "generated_at": datetime.now(timezone.utc).isoformat(), "dashboard_template_id": dashboard_template["id"], **applied_filters},
         "kpis": kpis,
     }
     content_by_ref = {**kpi_by_ref, **chart_by_ref, **table_by_ref}
